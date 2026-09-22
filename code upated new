@@ -1,0 +1,2781 @@
+
+  import { launchImageLibraryAsync } from 'expo-image-picker';
+import * as Location from 'expo-location';
+import * as Updates from 'expo-updates';
+import {
+  createUserWithEmailAndPassword,
+  reload,
+  sendEmailVerification,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut
+} from 'firebase/auth';
+import {
+  addDoc,
+  collection,
+  deleteDoc, doc, getDocs, onSnapshot, query,
+  serverTimestamp, updateDoc, where
+} from 'firebase/firestore';
+import { useEffect, useState } from 'react';
+import {
+  Alert,
+  Dimensions,
+  Image,
+  Modal,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput, TouchableOpacity,
+  View
+} from 'react-native';
+import QRCode from 'react-native-qrcode-svg';
+import { WebView } from 'react-native-webview';
+import { auth, db } from '../../firebase'; // auth added
+
+  const { width: SCREEN_WIDTH } = Dimensions.get('window');
+  const IS_TABLET = SCREEN_WIDTH >= 600;
+  const CONTENT_MAX_WIDTH = IS_TABLET ? 1100 : 720;
+  const HORIZONTAL_PADDING = IS_TABLET ? 24 : 16;
+
+  type Report = {
+  id: string;
+  ownerUid?: string;
+  type: string;
+  name: string;
+  species: string;
+  breed: string;
+  markings?: string;
+  coatPattern?: string;
+  tagId?: string | null;
+  location: string;
+  contact: string;
+  status: string;
+  lat: number;
+  lng: number;
+  imageUrl?: string;
+  };
+
+
+
+  type PetProfile = {
+    id: string;
+    petId: string;
+    ownerUid: string;
+    petName: string;
+    species: string;
+    breed: string;
+    coatPattern: string;
+    markings: string;
+    imageUrl?: string | null;
+    location: string;
+    contact: string;
+    status: string;
+    tagId?: string | null;
+    createdAt?: any;
+  };
+
+
+  type AppNotification = {
+    id: string;
+    title: string;
+    message: string;
+    type: string;
+    reportId?: string;
+    createdAt: any;
+    read: boolean;
+  };
+
+
+
+
+  type UserAccount = {
+  id: string;
+  uid: string;
+  name: string;
+  email: string;
+  role: string;
+  emailVerified: boolean;
+  active: boolean;
+  createdAt: any;
+  createdByAdmin?: boolean;
+  };
+
+
+
+
+
+  export default function App() {
+  const [currentRole, setCurrentRole] = useState('GUEST');
+  const [activeTab, setActiveTab] = useState('login');
+  const [authMode, setAuthMode] = useState('login');
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [signupName, setSignupName] = useState('');
+  const [signupEmail, setSignupEmail] = useState('');
+  const [signupPassword, setSignupPassword] = useState('');
+  const [signupConfirmPassword, setSignupConfirmPassword] = useState('');
+  const [signupRole, setSignupRole] = useState('PET OWNER');
+  const [signingUp, setSigningUp] = useState(false);
+  const [reports, setReports] = useState<Report[]>([]);
+  const [currentUserUid, setCurrentUserUid] = useState<string | null>(auth?.currentUser?.uid || null);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [showNotifications, setShowNotifications] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
+  // ===== SIDEBAR: collapsible navigation sections =====
+  const [sidebarSections, setSidebarSections] = useState({
+    MAIN: true,
+    'PET TOOLS': true,
+    RECOVERY: true,
+    ADMINISTRATION: true,
+    ACCOUNT: true,
+  });
+  const [loading, setLoading] = useState(true);
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+  const [updatingApp, setUpdatingApp] = useState(false);
+  const [uiZoom, setUiZoom] = useState(1);
+  const [formType, setFormType] = useState('LOST');
+  const [formName, setFormName] = useState('');
+  const [formSpecies, setFormSpecies] = useState('Dog');
+  const [formBreed, setFormBreed] = useState('');
+  const [formCoatPattern, setFormCoatPattern] = useState('');
+  const [formMarkings, setFormMarkings] = useState('');
+  const [formLocation, setFormLocation] = useState('');
+  const [formContact, setFormContact] = useState('');
+  const [formImage, setFormImage] = useState<string | null>(null);
+  const [aiRecognitionResult, setAiRecognitionResult] = useState<string | null>(null);
+  const [aiRecognizing, setAiRecognizing] = useState(false);
+
+
+
+  const [selectedCoords, setSelectedCoords] = useState({
+    latitude: 11.0515,
+    longitude: 124.0055,
+  });
+  const [ownerName, setOwnerName] = useState('');
+  const [petName, setPetName] = useState('');
+  const [tagId, setTagId] = useState('FF-2026-BOGO-8842');
+  const [posterName, setPosterName] = useState('');
+  const [posterBreed, setPosterBreed] = useState('');
+  const [posterMarkings, setPosterMarkings] = useState('');
+  const [posterContact, setPosterContact] = useState('');
+  const [posterImage, setPosterImage] = useState<string | null>(null);
+  const [nameOnlyMode, setNameOnlyMode] = useState(true);
+  const [generatedPoster, setGeneratedPoster] = useState<{ name: string; breed: string; markings: string; contact: string; timestamp: string } | null>(null);
+
+  // ===== PET OWNER: Pet Profile State =====
+  const [petProfiles, setPetProfiles] = useState<PetProfile[]>([]);
+  const [petProfilesLoading, setPetProfilesLoading] = useState(false);
+  const [editingPetProfile, setEditingPetProfile] = useState<PetProfile | null>(null);
+  const [showPetProfileModal, setShowPetProfileModal] = useState(false);
+  const [petProfileName, setPetProfileName] = useState('');
+  const [petProfileSpecies, setPetProfileSpecies] = useState('Dog');
+  const [petProfileBreed, setPetProfileBreed] = useState('');
+  const [petProfileCoatPattern, setPetProfileCoatPattern] = useState('');
+  const [petProfileMarkings, setPetProfileMarkings] = useState('');
+  const [petProfileLocation, setPetProfileLocation] = useState('');
+  const [petProfileContact, setPetProfileContact] = useState('');
+  const [petProfileImage, setPetProfileImage] = useState<string | null>(null);
+  const [petProfileStatus, setPetProfileStatus] = useState('Active');
+  const [selectedPetForTag, setSelectedPetForTag] = useState<PetProfile | null>(null);
+
+
+  // ===== ADMIN: User Management State =====
+  const [allUsers, setAllUsers] = useState<UserAccount[]>([]);
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [adminSubTab, setAdminSubTab] = useState('dashboard'); // dashboard | users | reports | recovery
+  const [generatedAdminReport, setGeneratedAdminReport] = useState<any | null>(null);
+  const [editingUser, setEditingUser] = useState<UserAccount | null>(null);
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [newUserName, setNewUserName] = useState('');
+  const [newUserEmail, setNewUserEmail] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState('PET OWNER');
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [editUserName, setEditUserName] = useState('');
+  const [editUserRole, setEditUserRole] = useState('');
+  const [editUserActive, setEditUserActive] = useState(true);
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+
+  // ===== ADMIN: Report Management State =====
+  const [reportFilterType, setReportFilterType] = useState('ALL'); // ALL | LOST | FOUND
+  const [reportFilterStatus, setReportFilterStatus] = useState('ALL'); // ALL | Active | Resolved
+  const [caseFilterType, setCaseFilterType] = useState('ALL'); // ALL | LOST | FOUND
+  const [caseFilterStatus, setCaseFilterStatus] = useState('ALL'); // ALL | Active | Resolved
+  const [editingReport, setEditingReport] = useState<Report | null>(null);
+  const [editReportName, setEditReportName] = useState('');
+  const [editReportBreed, setEditReportBreed] = useState('');
+  const [editReportMarkings, setEditReportMarkings] = useState('');
+  const [editReportLocation, setEditReportLocation] = useState('');
+  const [editReportContact, setEditReportContact] = useState('');
+  const [editReportStatus, setEditReportStatus] = useState('Active');
+
+  // ===== ADMIN: Recovery Report State =====
+  const [generatingRecoveryReport, setGeneratingRecoveryReport] = useState(false);
+  const [lastRecoveryReport, setLastRecoveryReport] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const checkForAppUpdate = async () => {
+      try {
+        if (__DEV__) return;
+        const result = await Updates.checkForUpdateAsync();
+        if (result.isAvailable && !cancelled) setUpdateAvailable(true);
+      } catch (error) {
+        console.log('⚠️ Update check failed:', error instanceof Error ? error.message : String(error));
+      }
+    };
+    void checkForAppUpdate();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        try {
+          const location = await Location.getCurrentPositionAsync({});
+          setSelectedCoords({
+            latitude: location.coords.latitude,
+            longitude: location.coords.longitude,
+          });
+        } catch {
+          console.log("Using default coordinates.");
+        }
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    console.log("🔄 Listening to reports...");
+    if (!db) {
+      console.log("⚠️ Firebase db NOT FOUND!");
+      Alert.alert('⚠️ Database Error', 'Firebase connection failed. Check firebase.ts file.');
+      setTimeout(() => setLoading(false), 0);
+      return;
+    }
+    try {
+      const q = query(collection(db, "reports"));
+      const unsubscribe = onSnapshot(q,
+        (snapshot) => {
+          console.log(`✅ Loaded ${snapshot.docs.length} reports`);
+          const liveReports = snapshot.docs.map(doc => {
+            const data = doc.data();
+            return {
+              id: doc.id,
+              ownerUid: data.ownerUid || '',
+              type: data.type || 'UNKNOWN',
+              name: data.name || 'Unnamed Pet',
+              species: data.species || 'Unknown',
+              breed: data.breed || 'Standard',
+              coatPattern: data.coatPattern || 'Solid/Unknown',
+              markings: data.markings || 'None specified',
+              location: data.location || 'Location not specified',
+              contact: data.contact || 'No contact provided',
+              status: data.status || 'Active',
+              lat: data.lat || 11.0515,
+              lng: data.lng || 124.0055,
+              imageUrl: data.imageUrl || null,
+            };
+          });
+          setReports(liveReports);
+          setLoading(false);
+        },
+        (error) => {
+          console.error("❌ Firestore Error:", error.code);
+          Alert.alert('📡 Database Notice',
+            error.code === 'permission-denied'
+              ? 'Update Firestore Rules in Firebase Console.'
+              : 'Limited mode: ' + error.message);
+          setReports([]);
+          setLoading(false);
+        }
+      );
+      return () => unsubscribe();
+    } catch (fatalError) {
+      console.error("❌ FATAL ERROR:", fatalError instanceof Error ? fatalError.message : String(fatalError));
+      Alert.alert('❌ App Error', 'Firebase connection failed. Check config.');
+      setTimeout(() => setLoading(false), 0);
+    }
+  }, []);
+
+  // ===== PET PROFILES: current owner's pets =====
+  useEffect(() => {
+    if (!currentUserUid || !db || currentRole !== 'PET OWNER') {
+      queueMicrotask(() => setPetProfiles([]));
+      return;
+    }
+    queueMicrotask(() => setPetProfilesLoading(true));
+    const q = query(collection(db, 'pets'), where('ownerUid', '==', currentUserUid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items: PetProfile[] = snapshot.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          petId: data.petId || d.id,
+          ownerUid: data.ownerUid || currentUserUid,
+          petName: data.petName || 'Unnamed Pet',
+          species: data.species || 'Unknown',
+          breed: data.breed || 'Unknown / Mixed Breed',
+          coatPattern: data.coatPattern || 'Not specified',
+          markings: data.markings || 'None specified',
+          imageUrl: data.imageUrl || null,
+          location: data.location || data.address || 'Location not specified',
+          contact: data.contact || 'No contact provided',
+          status: data.status || 'Active',
+          tagId: data.tagId || null,
+          createdAt: data.createdAt || null,
+        };
+      });
+      setPetProfiles(items);
+      setPetProfilesLoading(false);
+    }, (error) => {
+      console.log('⚠️ Pet profile listener:', error.code || error.message);
+      setPetProfilesLoading(false);
+    });
+    return () => unsubscribe();
+  }, [currentUserUid, currentRole]);
+
+  // ===== IN-APP NOTIFICATIONS: persistent Firestore listener =====
+  useEffect(() => {
+    const uid = currentUserUid || auth?.currentUser?.uid;
+    if (!uid || !db) {
+      queueMicrotask(() => setNotifications([]));
+      return;
+    }
+    const q = query(collection(db, 'notifications'), where('recipientUid', '==', uid));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const items: AppNotification[] = snapshot.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          title: data.title || 'Notification',
+          message: data.message || '',
+          type: data.type || 'GENERAL',
+          reportId: data.reportId || undefined,
+          createdAt: data.createdAt || null,
+          read: data.read === true,
+        };
+      }).sort((a, b) => {
+        const at = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
+        const bt = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+        return bt - at;
+      });
+      setNotifications(items);
+    }, (error) => {
+      console.log('⚠️ Notification listener:', error.code || error.message);
+    });
+    return () => unsubscribe();
+  }, [currentUserUid]);
+
+  // ===== UPDATE SAVED USER LOCATION FOR PROXIMITY ALERTS =====
+  useEffect(() => {
+    if (!currentUserUid || !db || currentRole === 'GUEST') return;
+    const updateLocation = async () => {
+      try {
+        const { status } = await Location.getForegroundPermissionsAsync();
+        if (status !== 'granted') return;
+        const location = await Location.getCurrentPositionAsync({});
+        const q = query(collection(db, 'users'), where('uid', '==', currentUserUid));
+        const snap = await getDocs(q);
+        if (!snap.empty) {
+          await updateDoc(snap.docs[0].ref, {
+            lat: location.coords.latitude,
+            lng: location.coords.longitude,
+            locationUpdatedAt: serverTimestamp(),
+          });
+        }
+      } catch (err) {
+        console.log('⚠️ Could not update saved location:', err instanceof Error ? err.message : String(err));
+      }
+    };
+    updateLocation();
+  }, [currentUserUid, currentRole]);
+
+  // ===== ADMIN: Listen to all user accounts (only when logged in as admin) =====
+  useEffect(() => {
+    if (currentRole !== 'ADMINISTRATOR') {
+      return;
+    }
+    if (!db) {
+      return;
+    }
+    try {
+      const q = query(collection(db, "users"));
+      const unsubscribe = onSnapshot(q,
+        (snapshot) => {
+          const liveUsers = snapshot.docs.map(d => {
+            const data = d.data();
+            return {
+              id: d.id,
+              uid: data.uid || '',
+              name: data.name || 'Unknown',
+              email: data.email || '',
+              role: data.role || 'PET OWNER',
+              emailVerified: data.emailVerified ?? false,
+              active: data.active ?? true,
+              createdAt: data.createdAt || null,
+              createdByAdmin: data.createdByAdmin || false,
+            };
+          });
+          setAllUsers(liveUsers);
+          setUsersLoading(false);
+        },
+        (error) => {
+          console.error("❌ Users Firestore Error:", error.code);
+          Alert.alert('📡 Database Notice',
+            error.code === 'permission-denied'
+              ? 'Update Firestore Rules to allow admin to read users.'
+              : 'Limited mode: ' + error.message);
+          setAllUsers([]);
+          setUsersLoading(false);
+        }
+      );
+      return () => unsubscribe();
+    } catch (err) {
+      console.error("❌ Users fetch fatal error:", err instanceof Error ? err.message : String(err));
+    }
+  }, [currentRole]);
+
+  const addNotification = async (title: string, message: string, type = 'GENERAL', recipientUid?: string, reportId?: string) => {
+    const targetUid = recipientUid || currentUserUid || auth?.currentUser?.uid;
+    if (!targetUid) return;
+    try {
+      if (!db) return;
+      await addDoc(collection(db, 'notifications'), {
+        recipientUid: targetUid,
+        senderUid: auth?.currentUser?.uid || null,
+        title,
+        message,
+        type,
+        reportId: reportId || null,
+        read: false,
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.log('⚠️ Notification write failed:', err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const getNotificationTime = (value: any) => {
+    if (value?.toDate) return value.toDate().toLocaleString();
+    if (value instanceof Date) return value.toLocaleString();
+    return new Date().toLocaleString();
+  };
+
+  const distanceKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+    const toRad = (v: number) => (v * Math.PI) / 180;
+    const R = 6371;
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  };
+
+  const notifyNearbyUsers = async (report: { lat: number; lng: number; type: string; name: string }, radiusKm = 5) => {
+    if (!db) return;
+    try {
+      const usersSnap = await getDocs(collection(db, 'users'));
+      const jobs: Promise<void>[] = [];
+      usersSnap.docs.forEach(userDoc => {
+        const u = userDoc.data();
+        const uid = u.uid;
+        const lat = Number(u.lat);
+        const lng = Number(u.lng);
+        if (!uid || uid === currentUserUid || !Number.isFinite(lat) || !Number.isFinite(lng)) return;
+        if (distanceKm(report.lat, report.lng, lat, lng) <= radiusKm) {
+          jobs.push(addNotification(
+            report.type === 'LOST' ? '📍 Lost Pet Near You' : '🐾 Found Pet Near You',
+            `${report.name} was reported ${report.type.toLowerCase()} within about ${radiusKm} km of your saved location. Check the Cases/Map tab.`,
+            'PROXIMITY', uid
+          ));
+        }
+      });
+      await Promise.all(jobs);
+    } catch (err) {
+      console.log('⚠️ Nearby notification check failed:', err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const notifyPotentialLostOwners = async (newReport: any) => {
+    if (!db || newReport.type !== 'FOUND') return;
+    try {
+      const lostReports = reports.filter(r => r.type === 'LOST' && r.status === 'Active' && r.ownerUid);
+      const jobs: Promise<void>[] = [];
+      lostReports.forEach(lost => {
+        let score = 50;
+        const lostSpecies = (lost.species || '').trim().toLowerCase();
+        const foundSpecies = (newReport.species || '').trim().toLowerCase();
+        const lostBreed = (lost.breed || '').trim().toLowerCase();
+        const foundBreed = (newReport.breed || '').trim().toLowerCase();
+        const lostCoat = (lost.coatPattern || '').trim().toLowerCase();
+        const foundCoat = (newReport.coatPattern || '').trim().toLowerCase();
+        const unknownBreed = (value: string) => !value || value.includes('unknown') || value.includes('mixed breed') || value === 'none' || value === 'n/a';
+
+        if (lostSpecies && foundSpecies && lostSpecies === foundSpecies) score += 20;
+        if (!unknownBreed(lostBreed) && !unknownBreed(foundBreed) && (lostBreed.includes(foundBreed) || foundBreed.includes(lostBreed))) score += 15;
+        if (lost.markings && newReport.markings && lost.markings.toLowerCase() !== 'none' && newReport.markings.toLowerCase().includes(lost.markings.toLowerCase())) score += 10;
+        if (!unknownBreed(lostCoat) && !unknownBreed(foundCoat) && (lostCoat.includes(foundCoat) || foundCoat.includes(lostCoat))) score += 5;
+        if (distanceKm(lost.lat, lost.lng, newReport.lat, newReport.lng) <= 5) score += 5;
+        score = Math.min(100, score);
+        if (score >= 75 && lost.ownerUid) {
+          jobs.push(addNotification(
+            '🔎 Possible Match for Your Lost Pet',
+            `A found report for ${newReport.name} may match your lost pet ${lost.name} (${score}% match). Review the case in FurEver Found.`,
+            'MATCH', lost.ownerUid, newReport.id
+          ));
+        }
+      });
+      await Promise.all(jobs);
+    } catch (err) {
+      console.log('⚠️ Match notification failed:', err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const saveLoginRecord = async (email: string, role: string) => {
+    try {
+      if (!db) return;
+      await addDoc(collection(db, "login_logs"), {
+        email: email,
+        role: role,
+        loginTime: serverTimestamp(),
+        platform: Platform.OS,
+        deviceTime: new Date().toLocaleString()
+      });
+      console.log("✅ Login saved!");
+    } catch (err) {
+      console.log("⚠️ Could not save login:", err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const isValidEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+  const handleSignUp = async () => {
+    if (!signupName || !signupEmail || !signupPassword || !signupConfirmPassword) {
+      Alert.alert('⚠️ Error', 'Please fill in all fields to sign up.');
+      return;
+    }
+    if (!isValidEmail(signupEmail)) {
+      Alert.alert('⚠️ Error', 'Please enter a valid email address.');
+      return;
+    }
+    if (signupPassword.length < 6) {
+      Alert.alert('⚠️ Error', 'Password must be at least 6 characters.');
+      return;
+    }
+    if (signupPassword !== signupConfirmPassword) {
+      Alert.alert('⚠️ Error', 'Passwords do not match.');
+      return;
+    }
+    if (!auth || !db) {
+      Alert.alert('❌ Error', 'Firebase not connected. Check firebase.ts');
+      return;
+    }
+    if (signupRole === 'ADMINISTRATOR') {
+      Alert.alert('🔐 Admin Account', 'Admin accounts are private and cannot be created through public Sign Up.');
+      return;
+    }
+    setSigningUp(true);
+    try {
+      const email = signupEmail.trim().toLowerCase();
+      const name = signupName.trim();
+
+      // Create the Firebase Authentication account first.
+      const userCred = await createUserWithEmailAndPassword(
+        auth,
+        email,
+        signupPassword
+      );
+      const user = userCred.user;
+
+      // Send the verification email and create the Firestore profile
+      // at the same time instead of waiting for them one after another.
+      await Promise.all([
+        sendEmailVerification(user),
+        addDoc(collection(db, "users"), {
+          uid: user.uid,
+          name,
+          email,
+          role: signupRole,
+          emailVerified: false,
+          active: true,
+          createdAt: serverTimestamp(),
+          platform: Platform.OS,
+        }),
+      ]);
+
+      Alert.alert(
+        '✅ Account Created!',
+        `Verification email sent to:\n${email}\n\n📬 Check your Gmail inbox. Verify BEFORE logging in.`,
+        [{ text: 'I Will Verify' }]
+      );
+
+      setSignupName('');
+      setSignupEmail('');
+      setSignupPassword('');
+      setSignupConfirmPassword('');
+      setSignupRole('PET OWNER');
+      setAuthMode('login');
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/email-already-in-use') {
+        Alert.alert('⚠️ Account Exists', 'This email is already registered. Try logging in.');
+      } else {
+        Alert.alert('❌ Sign Up Error', err instanceof Error ? err.message : 'Unknown error occurred');
+      }
+    } finally {
+      setSigningUp(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const email = authEmail.trim().toLowerCase();
+
+    if (!email) {
+      Alert.alert('🔑 Forgot Password', 'Please enter your registered email address first.');
+      return;
+    }
+
+    if (!isValidEmail(email)) {
+      Alert.alert('⚠️ Invalid Email', 'Please enter a valid email address.');
+      return;
+    }
+
+    if (!auth) {
+      Alert.alert('❌ Error', 'Firebase not connected. Check firebase.ts');
+      return;
+    }
+
+    try {
+      await sendPasswordResetEmail(auth, email);
+      Alert.alert(
+        '📧 Reset Email Sent',
+        `A password reset link has been sent to:\n${email}\n\nCheck your Gmail inbox and follow the instructions to create a new password.`
+      );
+    } catch (err: any) {
+      const code = err?.code || '';
+      if (code === 'auth/user-not-found') {
+        Alert.alert('❌ Account Not Found', 'No account was found for this email address.');
+      } else if (code === 'auth/invalid-email') {
+        Alert.alert('⚠️ Invalid Email', 'Please enter a valid email address.');
+      } else {
+        Alert.alert('❌ Reset Failed', err instanceof Error ? err.message : 'Could not send the password reset email.');
+      }
+    }
+  };
+
+  const handleCredentialLogin = async () => {
+    if (!authEmail || !authPassword) {
+      Alert.alert('Error', 'Please enter both Email and Password.');
+      return;
+    }
+    if (!auth || !db) {
+      Alert.alert('❌ Error', 'Firebase not connected. Check firebase.ts');
+      return;
+    }
+
+    try {
+      const email = authEmail.trim().toLowerCase();
+      const userCred = await signInWithEmailAndPassword(auth, email, authPassword);
+      const user = userCred.user;
+
+      // Always read the actual role stored in Firestore.
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('email', '==', email));
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        Alert.alert('❌ Login Failed', 'No account profile found.');
+        await signOut(auth);
+        return;
+      }
+
+      const userDoc = snap.docs[0].data();
+      const userDocRef = snap.docs[0].ref;
+      const actualRole = userDoc.role || '';
+
+      if (userDoc.active === false) {
+        Alert.alert('🚫 Account Deactivated', 'This account has been deactivated by an administrator. Please contact support.');
+        await signOut(auth);
+        return;
+      }
+
+      // Admin accounts are private/pre-created, so they do not need the public
+      // Gmail verification step. Pet Owner and Community Member accounts do.
+      if (actualRole !== 'ADMINISTRATOR') {
+        await reload(user);
+        if (!user.emailVerified) {
+          Alert.alert(
+            '📬 Email Not Verified',
+            'Please check your Gmail and click the verification link first.',
+            [
+              {
+                text: 'Resend Email',
+                onPress: async () => {
+                  try {
+                    await sendEmailVerification(user);
+                    Alert.alert('✅ Resent!', 'Verification email sent again.');
+                  } catch (resendError) {
+                    Alert.alert(
+                      '❌ Resend Failed',
+                      resendError instanceof Error ? resendError.message : 'Could not resend verification email.'
+                    );
+                  }
+                }
+              },
+              { text: 'OK' }
+            ]
+          );
+          await signOut(auth);
+          return;
+        }
+      }
+
+      await saveLoginRecord(email, actualRole);
+      setCurrentUserUid(user.uid);
+      setCurrentRole(actualRole);
+      setActiveTab(actualRole === 'ADMINISTRATOR' ? 'admin' : 'map');
+      setAdminSubTab('dashboard');
+      setAuthEmail('');
+      setAuthPassword('');
+
+      // Keep the Firestore profile in sync for verified public accounts.
+      if (actualRole !== 'ADMINISTRATOR') {
+        await updateDoc(userDocRef, { emailVerified: true });
+      }
+
+      Alert.alert(
+        actualRole === 'ADMINISTRATOR' ? '🔐 Admin Login Successful' : '✅ Verified & Logged In',
+        `Welcome! Signed in as ${actualRole}`
+      );
+    } catch (err: any) {
+      Alert.alert('❌ Login Error', err instanceof Error ? err.message : 'Unknown error');
+    }
+  };
+
+  const handleLogin = async (roleType: string) => {
+    if (!authEmail) {
+      Alert.alert('Error', 'Please enter your Email/Username.');
+      return;
+    }
+    if (!db) {
+      Alert.alert('❌ Error', 'Firebase not connected.');
+      return;
+    }
+    try {
+      await saveLoginRecord(authEmail, roleType);
+      setCurrentUserUid(auth?.currentUser?.uid || null);
+      setCurrentRole(roleType);
+      setActiveTab('map');
+      setAuthEmail('');
+      setAuthPassword('');
+      Alert.alert('✅ Success', `Logged in successfully as ${roleType}`);
+    } catch (err) {
+      Alert.alert('❌ Login Error', err instanceof Error ? err.message : 'Unknown error');
+    }
+  };
+
+  const handleLogout = async () => {
+    if (auth) await signOut(auth);
+    setCurrentUserUid(null);
+    setNotifications([]);
+    setShowNotifications(false);
+    setCurrentRole('GUEST');
+    setActiveTab('login');
+    setAuthMode('login');
+    setAdminSubTab('dashboard');
+    Alert.alert('👋 Logged Out', 'See you next time!');
+  };
+
+  const toggleSidebarSection = (section: keyof typeof sidebarSections) => {
+    setSidebarSections(prev => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  const navigateFromSidebar = (tab: string, adminSub?: string, caseType?: string) => {
+    setActiveTab(tab);
+    if (adminSub) setAdminSubTab(adminSub);
+    if (caseType) setCaseFilterType(caseType);
+    setShowMenu(false);
+  };
+
+
+
+  const handleAIRecognition = async () => {
+    if (!formImage) {
+      Alert.alert('📷 No Photo', 'Please upload a pet photo first.');
+      return;
+    }
+
+    setAiRecognizing(true);
+    setAiRecognitionResult(null);
+
+    // Local/demo recognition only: no backend or ML model is used.
+    // Every uploaded animal photo remains eligible for matching, even when
+    // the breed is unknown or the animal is mixed breed.
+    await new Promise(resolve => setTimeout(resolve, 700));
+
+    const species = formSpecies.trim() || 'Unknown Animal';
+    const breed = formBreed.trim() || 'Unknown / Mixed Breed';
+    const traits = formMarkings.trim() || formCoatPattern.trim() || 'No additional traits provided';
+
+    setAiRecognitionResult(
+      `Photo is ready for matching\nAnimal: ${species}\nBreed: ${breed}\nTraits: ${traits}\nStatus: Ready for AI Matching`
+    );
+    setAiRecognizing(false);
+  };
+
+  const handleFormSubmit = async () => {
+
+
+
+    if (currentRole === 'ADMINISTRATOR') {
+      Alert.alert('🔒 Admin Restricted', 'Administrators manage submitted reports and do not submit new reports from this form.');
+      return;
+    }
+
+    if (!formName || !formLocation || !formContact) {
+      Alert.alert('⚠️ Error', 'Please fill in Name, Location, and Contact.');
+      return;
+    }
+    if (!db) {
+      Alert.alert('❌ Error', 'Database not connected.');
+      return;
+    }
+    const submissionType = currentRole === 'COMMUNITY MEMBER' ? 'FOUND' : formType;
+    const newReport = {
+      ownerUid: currentUserUid || auth?.currentUser?.uid || null,
+      type: submissionType,
+      name: formName,
+      species: formSpecies,
+      breed: formBreed.trim() || 'Unknown / Mixed Breed',
+      coatPattern: formCoatPattern || 'Solid',
+      markings: formMarkings || 'None',
+      location: formLocation,
+      contact: formContact,
+      lat: selectedCoords.latitude,
+      lng: selectedCoords.longitude,
+      status: 'Active',
+      imageUrl: formImage,
+      tagId: tagId !== 'FF-2026-BOGO-8842' ? tagId : null,
+      createdAt: serverTimestamp()
+    };
+    try {
+      const reportRef = await addDoc(collection(db, "reports"), newReport);
+      const persistentTagId =
+        tagId !== 'FF-2026-BOGO-8842' ? tagId : `FF-${reportRef.id.slice(0, 8).toUpperCase()}`;
+      await updateDoc(reportRef, { tagId: persistentTagId });
+      const savedReport = { ...newReport, id: reportRef.id, tagId: persistentTagId };
+      await addNotification(
+        '🐾 Report Submitted',
+        `Your ${submissionType.toLowerCase()} report for ${formName} was submitted successfully.`,
+        'REPORT',
+        currentUserUid || undefined,
+        reportRef.id
+      );
+      await notifyNearbyUsers(savedReport);
+      await notifyPotentialLostOwners(savedReport);
+      Alert.alert('✅ Saved!', `${submissionType} report submitted successfully.`);
+      setFormName('');
+      setFormBreed('');
+      setFormCoatPattern('');
+      setFormMarkings('');
+      setFormLocation('');
+      setFormContact('');
+      setFormImage(null);
+
+      
+    } catch (err) {
+      Alert.alert('❌ Error', err instanceof Error ? err.message : 'An error occurred');
+    }
+  };
+
+
+
+  const handleDeleteReport = async (reportId: string, reportName: string) => {
+    // Per project requirements, only Administrators can delete reports.
+    if (currentRole !== 'ADMINISTRATOR') {
+      Alert.alert('⛔ Access Denied', 'Only an Administrator can delete reports.');
+      return;
+    }
+
+    Alert.alert(
+      "Delete Report",
+      `Remove "${reportName}"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Delete", style: "destructive", onPress: async () => {
+          try {
+            if (!db) return;
+            await deleteDoc(doc(db, "reports", reportId));
+            Alert.alert("✅ Deleted", "Report has been removed.");
+          } catch (err) {
+            Alert.alert("❌ Error", err instanceof Error ? err.message : "Could not delete report.");
+          }
+        }}
+      ]
+    );
+  };
+
+  const resetPetProfileForm = () => {
+    setEditingPetProfile(null);
+    setPetProfileName('');
+    setPetProfileSpecies('Dog');
+    setPetProfileBreed('');
+    setPetProfileCoatPattern('');
+    setPetProfileMarkings('');
+    setPetProfileLocation('');
+    setPetProfileContact('');
+    setPetProfileImage(null);
+    setPetProfileStatus('Active');
+  };
+
+  const openCreatePetProfile = () => {
+    resetPetProfileForm();
+    setShowPetProfileModal(true);
+  };
+
+  const openEditPetProfile = (pet: PetProfile) => {
+    setEditingPetProfile(pet);
+    setPetProfileName(pet.petName);
+    setPetProfileSpecies(pet.species || 'Dog');
+    setPetProfileBreed(pet.breed || '');
+    setPetProfileCoatPattern(pet.coatPattern || '');
+    setPetProfileMarkings(pet.markings || '');
+    setPetProfileLocation(pet.location || '');
+    setPetProfileContact(pet.contact || '');
+    setPetProfileImage(pet.imageUrl || null);
+    setPetProfileStatus(pet.status || 'Active');
+    setShowPetProfileModal(true);
+  };
+
+  const savePetProfile = async () => {
+    if (!db || !currentUserUid) {
+      Alert.alert('❌ Error', 'Please login as a Pet Owner first.');
+      return;
+    }
+    if (!petProfileName.trim() || !petProfileLocation.trim() || !petProfileContact.trim()) {
+      Alert.alert('⚠️ Missing Information', 'Pet Name, Location, and Contact Number are required.');
+      return;
+    }
+
+    try {
+      const profileData = {
+        petName: petProfileName.trim(),
+        species: petProfileSpecies.trim() || 'Unknown',
+        breed: petProfileBreed.trim() || 'Unknown / Mixed Breed',
+        coatPattern: petProfileCoatPattern.trim() || 'Not specified',
+        markings: petProfileMarkings.trim() || 'None specified',
+        imageUrl: petProfileImage || null,
+        location: petProfileLocation.trim(),
+        contact: petProfileContact.trim(),
+        status: petProfileStatus || 'Active',
+        ownerUid: currentUserUid,
+        updatedAt: serverTimestamp(),
+      };
+
+      if (editingPetProfile) {
+        // IMPORTANT: petId and tagId are intentionally NOT changed during profile editing.
+        await updateDoc(doc(db, 'pets', editingPetProfile.id), profileData);
+        Alert.alert('✅ Pet Profile Updated', `${profileData.petName}'s information and location were updated.
+
+  Pet ID and QR Tag remain unchanged.`);
+      } else {
+        const petRef = await addDoc(collection(db, 'pets'), {
+          ...profileData,
+          petId: 'PENDING',
+          tagId: null,
+          createdAt: serverTimestamp(),
+        });
+        const generatedPetId = `PET-${petRef.id.slice(0, 8).toUpperCase()}`;
+        const generatedTagId = `FF-${petRef.id.slice(0, 8).toUpperCase()}`;
+        await updateDoc(petRef, { petId: generatedPetId, tagId: generatedTagId });
+
+        // Automatically create and save the QR tag for the newly created pet.
+        await addDoc(collection(db, 'petTags'), {
+          tagId: generatedTagId,
+          petId: generatedPetId,
+          petProfileId: petRef.id,
+          ownerUid: currentUserUid,
+          petName: profileData.petName,
+          ownerName: auth?.currentUser?.email || 'Pet Owner',
+          species: profileData.species,
+          breed: profileData.breed,
+          coatPattern: profileData.coatPattern,
+          markings: profileData.markings,
+          address: profileData.location,
+          contact: profileData.contact,
+          imageUrl: profileData.imageUrl || null,
+          status: profileData.status,
+          createdAt: serverTimestamp(),
+        });
+
+        // Automatically create a poster from the newly created pet profile.
+        // The poster uses the saved pet photo and profile information so the
+        // owner does not have to fill out a second poster form.
+        const automaticPoster = {
+          ownerUid: currentUserUid,
+          petId: generatedPetId,
+          petProfileId: petRef.id,
+          name: profileData.petName,
+          breed: profileData.breed,
+          markings: [profileData.coatPattern, profileData.markings].filter(Boolean).join(' | ') || 'None specified',
+          contact: profileData.contact,
+          imageUrl: profileData.imageUrl || null,
+          createdAt: serverTimestamp(),
+          status: 'Active',
+          automatic: true,
+        };
+        const posterRef = await addDoc(collection(db, 'posters'), automaticPoster);
+
+        setPosterImage(profileData.imageUrl || null);
+        setGeneratedPoster({
+          name: profileData.petName,
+          breed: profileData.breed,
+          markings: automaticPoster.markings,
+          contact: profileData.contact,
+          timestamp: new Date().toLocaleDateString(),
+        });
+
+        Alert.alert('✅ Pet Profile Created', `${profileData.petName} has been registered.\n\nPet ID: ${generatedPetId}\nQR Tag: ${generatedTagId}\n\n🪪 QR tag and 🖼️ automatic poster were generated successfully.\nPoster ID: ${posterRef.id}`, [
+          { text: 'View Poster', onPress: () => setActiveTab('posterResult') },
+          { text: 'Done', style: 'cancel' },
+        ]);
+      }
+
+      setShowPetProfileModal(false);
+      resetPetProfileForm();
+    } catch (err) {
+      Alert.alert('❌ Save Failed', err instanceof Error ? err.message : 'Could not save pet profile.');
+    }
+  };
+
+  const generatePetProfileQrTag = async (pet: PetProfile) => {
+    if (!db || !currentUserUid) {
+      Alert.alert('❌ Error', 'Please login as a Pet Owner first.');
+      return;
+    }
+
+    const generated = pet.tagId || `FF-${pet.id.slice(0, 8).toUpperCase()}`;
+    try {
+      if (!pet.tagId) {
+        await addDoc(collection(db, 'petTags'), {
+          tagId: generated,
+          petId: pet.petId,
+          petProfileId: pet.id,
+          ownerUid: currentUserUid,
+          petName: pet.petName,
+          ownerName: auth?.currentUser?.email || 'Pet Owner',
+          species: pet.species,
+          breed: pet.breed,
+          coatPattern: pet.coatPattern,
+          markings: pet.markings,
+          address: pet.location,
+          contact: pet.contact,
+          imageUrl: pet.imageUrl || null,
+          status: pet.status || 'Active',
+          createdAt: serverTimestamp(),
+        });
+        await updateDoc(doc(db, 'pets', pet.id), { tagId: generated, updatedAt: serverTimestamp() });
+      }
+
+      const updatedPet = { ...pet, tagId: generated };
+      setSelectedPetForTag(updatedPet);
+      setTagId(generated);
+      setPetName(pet.petName);
+      setOwnerName(auth?.currentUser?.email || 'Pet Owner');
+      setFormSpecies(pet.species);
+      setFormBreed(pet.breed);
+      setFormCoatPattern(pet.coatPattern);
+      setFormMarkings(pet.markings);
+      setFormLocation(pet.location);
+      setFormContact(pet.contact);
+      setFormImage(pet.imageUrl || null);
+      Alert.alert('✅ QR Tag Ready', `${pet.petName}'s QR tag is ready. You can scan the QR below or regenerate it after changing the address.`);
+    } catch (err) {
+      Alert.alert('❌ QR Tag Error', err instanceof Error ? err.message : 'Could not create the QR tag.');
+    }
+  };
+
+  const regeneratePetProfileQrTag = async (pet: PetProfile) => {
+    if (!db || !currentUserUid) return;
+    const generated = `FF-${pet.id.slice(0, 8).toUpperCase()}-${Date.now().toString().slice(-4)}`;
+    try {
+      await addDoc(collection(db, 'petTags'), {
+        tagId: generated,
+        petId: pet.petId,
+        petProfileId: pet.id,
+        ownerUid: currentUserUid,
+        petName: pet.petName,
+        ownerName: auth?.currentUser?.email || 'Pet Owner',
+        species: pet.species,
+        breed: pet.breed,
+        coatPattern: pet.coatPattern,
+        markings: pet.markings,
+        address: pet.location,
+        contact: pet.contact,
+        imageUrl: pet.imageUrl || null,
+        status: pet.status || 'Active',
+        createdAt: serverTimestamp(),
+      });
+      await updateDoc(doc(db, 'pets', pet.id), { tagId: generated, updatedAt: serverTimestamp() });
+      setSelectedPetForTag({ ...pet, tagId: generated });
+      setTagId(generated);
+      Alert.alert('✅ QR Tag Regenerated', `${pet.petName}'s QR tag now uses the latest pet profile location.`);
+    } catch (err) {
+      Alert.alert('❌ Regenerate Failed', err instanceof Error ? err.message : 'Could not regenerate QR tag.');
+    }
+  };
+
+  const generateTag = async () => {
+    if (!petName || !ownerName || !formLocation || !formContact) {
+      Alert.alert('⚠️ Missing Info', 'Please fill in Owner Full Name, Pet Name, Full Address/Location, and Contact Number. Breed may be left blank for Unknown / Mixed Breed.');
+      return;
+    }
+    if (!db) {
+      Alert.alert('❌ Error', 'Database not connected.');
+      return;
+    }
+
+    const generated = 'FF-2026-' + Math.floor(1000 + Math.random() * 9000);
+    setTagId(generated);
+
+    try {
+      const tagRef = await addDoc(collection(db, 'petTags'), {
+        tagId: generated,
+        ownerUid: currentUserUid || auth?.currentUser?.uid || null,
+        petName,
+        ownerName,
+        species: formSpecies || 'Pet',
+        breed: formBreed.trim() || 'Unknown / Mixed Breed',
+        coatPattern: formCoatPattern || 'Not specified',
+        markings: formMarkings || 'None specified',
+        address: formLocation,
+        contact: formContact,
+        lat: selectedCoords.latitude,
+        lng: selectedCoords.longitude,
+        imageUrl: formImage || null,
+        status: 'Active',
+        createdAt: serverTimestamp(),
+      });
+
+      Alert.alert(
+        '✅ QR TAG CREATED & SAVED!',
+        `Tag ID: ${generated}\n\nQR information is now stored in Firebase.\nRecord: ${tagRef.id}`,
+        [{ text: 'View QR Tag', onPress: () => setActiveTab('petidResult') }]
+      );
+    } catch (err) {
+      setTagId('FF-2026-BOGO-8842');
+      Alert.alert('❌ QR Save Failed', err instanceof Error ? err.message : 'Could not save QR information.');
+    }
+  };
+
+  const handleGeneratePoster = async () => {
+    if (!posterName || !posterContact) {
+      Alert.alert('⚠️ Missing Info', 'Please enter Pet Name and Contact.');
+      return;
+    }
+
+    if (!db) {
+      Alert.alert('❌ Database Error', 'Firebase Firestore is not connected.');
+      return;
+    }
+
+    const posterData = {
+      ownerUid: currentUserUid || auth?.currentUser?.uid || null,
+      name: posterName.trim(),
+      breed: posterBreed.trim() || 'Unknown / Mixed Breed',
+      markings: posterMarkings.trim() || 'No markings provided',
+      contact: posterContact.trim(),
+      imageUrl: posterImage || null,
+      createdAt: serverTimestamp(),
+      status: 'Active'
+    };
+
+    try {
+      const posterRef = await addDoc(collection(db, 'posters'), posterData);
+
+      setGeneratedPoster({
+        name: posterData.name,
+        breed: posterData.breed,
+        markings: posterData.markings,
+        contact: posterData.contact,
+        timestamp: new Date().toLocaleDateString()
+      });
+
+      Alert.alert(
+        '✅ Poster Saved',
+        `Poster saved successfully to Firestore.\nPoster ID: ${posterRef.id}`,
+        [{ text: 'View Poster', onPress: () => setActiveTab('posterResult') }]
+      );
+    } catch (err) {
+      console.error('❌ Poster Firestore save failed:', err);
+      Alert.alert(
+        '❌ Save Failed',
+        err instanceof Error ? err.message : 'Could not save poster to Firestore.'
+      );
+    }
+  };
+
+  // Administrator can preview an existing lost-animal poster from a submitted report.
+  // This does not submit a report and does not provide the Admin with a poster-generation form.
+  const previewAdminPoster = (report: Report) => {
+    setPosterImage(report.imageUrl || null);
+    setGeneratedPoster({
+      name: report.name || 'Unknown Pet',
+      breed: report.breed || report.species || 'Unknown',
+      markings: [report.coatPattern, report.markings].filter(Boolean).join(' | ') || 'None specified',
+      contact: report.contact || 'No contact provided',
+      timestamp: new Date().toLocaleDateString(),
+    });
+  };
+
+  // ================= ADMIN: USER MANAGEMENT HANDLERS =================
+
+  // Create a new user profile in Firestore.
+  // IMPORTANT: calling createUserWithEmailAndPassword from the client here would
+  // sign the admin OUT and sign the new user IN (Firebase client SDK behavior).
+  // For a true "admin creates a login-ready account" flow, wire this to a backend
+  // Cloud Function using the Firebase Admin SDK. This client-side version creates
+  // the Firestore user profile/role record the admin can fully manage; the person
+  // still completes their own sign-up (or an Admin SDK function provisions Auth).
+  const handleAdminAddUser = async () => {
+    if (!newUserName || !newUserEmail || !newUserPassword) {
+      Alert.alert('⚠️ Error', 'Please fill in Name, Email, and Password.');
+      return;
+    }
+    if (!isValidEmail(newUserEmail)) {
+      Alert.alert('⚠️ Error', 'Please enter a valid email address.');
+      return;
+    }
+    if (newUserPassword.length < 6) {
+      Alert.alert('⚠️ Error', 'Password must be at least 6 characters.');
+      return;
+    }
+    if (!db) {
+      Alert.alert('❌ Error', 'Database not connected.');
+      return;
+    }
+    setCreatingUser(true);
+    try {
+      const usersRef = collection(db, "users");
+      const dupCheck = await getDocs(query(usersRef, where("email", "==", newUserEmail.trim().toLowerCase())));
+      if (!dupCheck.empty) {
+        Alert.alert('⚠️ Account Exists', 'A user with this email already exists.');
+        setCreatingUser(false);
+        return;
+      }
+      await addDoc(usersRef, {
+        name: newUserName,
+        email: newUserEmail.trim().toLowerCase(),
+        role: newUserRole,
+        emailVerified: true, // admin-created profiles are pre-verified
+        active: true,
+        createdAt: serverTimestamp(),
+        createdByAdmin: true,
+      });
+      Alert.alert(
+        '✅ User Profile Created',
+        `${newUserName} has been added as ${newUserRole}.\n\nNote: they'll need to sign up with this exact email via "Create Account" to set their own login password (or provision it via a backend Admin SDK function).`
+      );
+      setNewUserName('');
+      setNewUserEmail('');
+      setNewUserPassword('');
+      setNewUserRole('PET OWNER');
+      setShowAddUserModal(false);
+    } catch (err) {
+      Alert.alert('❌ Error', err instanceof Error ? err.message : 'Could not create user.');
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+
+  const openEditUser = (user: UserAccount) => {
+    setEditingUser(user);
+    setEditUserName(user.name);
+    setEditUserRole(user.role);
+    setEditUserActive(user.active ?? true);
+  };
+
+  const handleAdminUpdateUser = async () => {
+    if (!editingUser || !db) return;
+    if (!editUserName) {
+      Alert.alert('⚠️ Error', 'Name cannot be empty.');
+      return;
+    }
+    try {
+      await updateDoc(doc(db, "users", editingUser.id), {
+        name: editUserName,
+        role: editUserRole,
+        active: editUserActive,
+      });
+      Alert.alert('✅ Updated', `${editUserName}'s account has been updated.`);
+      setEditingUser(null);
+    } catch (err) {
+      Alert.alert('❌ Error', err instanceof Error ? err.message : 'Could not update user.');
+    }
+  };
+
+  const handleAdminToggleActive = (user: UserAccount) => {
+    const newStatus = !(user.active ?? true);
+    Alert.alert(
+      newStatus ? 'Reactivate Account' : 'Deactivate Account',
+      `${newStatus ? 'Reactivate' : 'Deactivate'} "${user.name}"'s account? ${!newStatus ? 'They will be unable to log in while deactivated.' : ''}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: newStatus ? 'Reactivate' : 'Deactivate',
+          style: newStatus ? 'default' : 'destructive',
+          onPress: async () => {
+            if (!db) return;
+            try {
+              await updateDoc(doc(db, "users", user.id), { active: newStatus });
+              Alert.alert(
+                newStatus ? '✅ Reactivated' : '🚫 Deactivated',
+                `${user.name} has been ${newStatus ? 'reactivated' : 'deactivated'}.`
+              );
+            } catch (err) {
+              Alert.alert('❌ Error', err instanceof Error ? err.message : 'Could not update status.');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  const handleAdminDeleteUser = (user: UserAccount) => {
+    Alert.alert(
+      "Delete User Account",
+      `Permanently delete "${user.name}"'s account profile? This cannot be undone.\n\nNote: this removes their Firestore profile only. Their Firebase Auth login (if any) must be deleted separately via a backend function using the Admin SDK.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete", style: "destructive", onPress: async () => {
+            try {
+              if (!db) return;
+              await deleteDoc(doc(db, "users", user.id));
+              Alert.alert("✅ Deleted", "User account has been removed.");
+            } catch (err) {
+              Alert.alert("❌ Error", err instanceof Error ? err.message : "Could not delete user.");
+            }
+          }
+        }
+      ]
+
+    );
+  };
+
+  // ================= ADMIN: REPORT MANAGEMENT HANDLERS =================
+
+  const openEditReport = (r: Report) => {
+    setEditingReport(r);
+    setEditReportName(r.name);
+    setEditReportBreed(r.breed);
+    setEditReportMarkings(r.markings || '');
+    setEditReportLocation(r.location);
+    setEditReportContact(r.contact);
+    setEditReportStatus(r.status);
+  };
+
+  const handleAdminUpdateReport = async () => {
+    if (!editingReport || !db) return;
+    if (!editReportName || !editReportLocation || !editReportContact) {
+      Alert.alert('⚠️ Error', 'Name, Location, and Contact are required.');
+      return;
+    }
+    try {
+      const oldStatus = editingReport.status;
+      await updateDoc(doc(db, "reports", editingReport.id), {
+        name: editReportName,
+        breed: editReportBreed,
+        markings: editReportMarkings,
+        location: editReportLocation,
+        contact: editReportContact,
+        status: editReportStatus,
+      });
+      if (editingReport.ownerUid && oldStatus !== editReportStatus) {
+        await addNotification(
+          '📋 Case Status Updated',
+          `${editingReport.name}'s case status changed from ${oldStatus} to ${editReportStatus}.`,
+          'STATUS', editingReport.ownerUid, editingReport.id
+        );
+      }
+      Alert.alert('✅ Updated', 'Report has been updated.');
+      setEditingReport(null);
+    } catch (err) {
+      Alert.alert('❌ Error', err instanceof Error ? err.message : 'Could not update report.');
+    }
+  };
+
+  const handleAdminSetReportStatus = async (reportId: string, newStatus: string) => {
+    if (!db) return;
+    try {
+      const report = reports.find(r => r.id === reportId);
+      const oldStatus = report?.status || 'Unknown';
+      await updateDoc(doc(db, "reports", reportId), { status: newStatus });
+      if (report?.ownerUid && oldStatus !== newStatus) {
+        await addNotification(
+          '📋 Case Status Updated',
+          `${report.name}'s case status changed from ${oldStatus} to ${newStatus}.`,
+          'STATUS', report.ownerUid, reportId
+        );
+      }
+    } catch (err) {
+      Alert.alert('❌ Error', err instanceof Error ? err.message : 'Could not update report status.');
+    }
+  };
+
+  const filteredCaseReports = reports.filter(r => {
+    const typeOk = caseFilterType === 'ALL' || r.type === caseFilterType;
+    const statusOk = caseFilterStatus === 'ALL' || r.status === caseFilterStatus;
+    return typeOk && statusOk;
+  });
+
+  const activeLostCases = reports.filter(r => r.type === 'LOST' && r.status === 'Active').length;
+  const activeFoundCases = reports.filter(r => r.type === 'FOUND' && r.status === 'Active').length;
+  const resolvedCases = reports.filter(r => r.status === 'Resolved' || r.status === 'Reunited').length;
+
+  const filteredAdminReports = reports.filter(r => {
+    const typeOk = reportFilterType === 'ALL' || r.type === reportFilterType;
+    const statusOk = reportFilterStatus === 'ALL' || r.status === reportFilterStatus;
+    return typeOk && statusOk;
+  });
+
+  // ================= ADMIN: RECOVERY REPORT GENERATION =================
+
+  const generateRecoveryReportText = () => {
+    const now = new Date().toLocaleString();
+    const resolvedCount = reports.filter(r => r.status === 'Resolved' || r.status === 'Reunited').length;
+    const activeLostCount = reports.filter(r => r.type === 'LOST' && r.status === 'Active').length;
+    const activeFoundCount = reports.filter(r => r.type === 'FOUND' && r.status === 'Active').length;
+    const rate = lostCount > 0 ? Math.round((resolvedCount / lostCount) * 100) : 0;
+
+    let text = `FUREVER FOUND — RECOVERY REPORT\n`;
+    text += `Bogo City AI Recovery Platform\n`;
+    text += `Generated: ${now}\n`;
+    text += `${'='.repeat(40)}\n\n`;
+    text += `SUMMARY\n${'-'.repeat(20)}\n`;
+    text += `Total Reports: ${reports.length}\n`;
+    text += `Total Registered Users: ${allUsers.length}\n`;
+    text += `Active Lost Cases: ${activeLostCount}\n`;
+    text += `Active Found Cases: ${activeFoundCount}\n`;
+    text += `Resolved / Reunited: ${resolvedCount}\n`;
+    text += `Recovery Rate: ${rate}%\n\n`;
+    text += `CASE DETAIL\n${'-'.repeat(20)}\n`;
+    reports.forEach((r, i) => {
+      text += `${i + 1}. [${r.type}] ${r.name} — ${r.species} (${r.breed}) — Status: ${r.status} — ${r.location} — ${r.contact}\n`;
+    });
+    return text;
+  };
+
+  const handleGenerateRecoveryReport = async () => {
+    if (!db) {
+      Alert.alert('❌ Error', 'Database not connected.');
+      return;
+    }
+    setGeneratingRecoveryReport(true);
+    try {
+      const resolvedCount = reports.filter(r => r.status === 'Resolved' || r.status === 'Reunited').length;
+      const rate = lostCount > 0 ? Math.round((resolvedCount / lostCount) * 100) : 0;
+      const reportText = generateRecoveryReportText();
+
+      await addDoc(collection(db, "recovery_reports"), {
+        generatedAt: serverTimestamp(),
+        totalReports: reports.length,
+        totalUsers: allUsers.length,
+        lostCount,
+        foundCount,
+        resolvedCount,
+        recoveryRate: rate,
+        reportText,
+      });
+
+      setLastRecoveryReport(reportText);
+      Alert.alert('📥 Recovery Report Generated', `Recovery rate: ${rate}%\nResolved cases: ${resolvedCount}\n\nReport saved to database and displayed below.`);
+    } catch (err) {
+      Alert.alert('❌ Error', err instanceof Error ? err.message : 'Could not generate recovery report.');
+    } finally {
+      setGeneratingRecoveryReport(false);
+      setActiveTab('adminRecoveryReport');
+    }
+  };
+
+  const lostCount = reports.filter(r => r.type === 'LOST').length;
+  const foundCount = reports.filter(r => r.type === 'FOUND').length;
+  const resolvedCount = reports.filter(r => r.status === 'Resolved' || r.status === 'Reunited').length;
+  const recoveryRate = lostCount > 0 ? Math.round((resolvedCount / lostCount) * 100) : 0;
+  const activeUsersCount = allUsers.filter(u => u.active ?? true).length;
+  const deactivatedUsersCount = allUsers.filter(u => !(u.active ?? true)).length;
+
+  const filteredUsers = allUsers.filter(u => {
+    if (!userSearchQuery) return true;
+    const q = userSearchQuery.toLowerCase();
+    return u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q) || u.role.toLowerCase().includes(q);
+  });
+
+  const applyAppUpdate = async () => {
+    try {
+      setUpdatingApp(true);
+      const result = await Updates.fetchUpdateAsync();
+      if (result.isNew) {
+        await Updates.reloadAsync();
+      } else {
+        setUpdateAvailable(false);
+        Alert.alert('Up to date', 'FurEver Found is already using the latest update.');
+      }
+    } catch (error) {
+      Alert.alert('Update Failed', 'The latest update could not be installed. Please try again later.');
+      console.log('⚠️ App update failed:', error instanceof Error ? error.message : String(error));
+    } finally {
+      setUpdatingApp(false);
+    }
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {updateAvailable && (
+        <View style={styles.updateBanner}>
+          <View style={styles.updateBannerTextWrap}>
+            <Text style={styles.updateBannerTitle}>📢 Update Available</Text>
+            <Text style={styles.updateBannerText}>A new FurEver Found update is ready.</Text>
+          </View>
+          <TouchableOpacity style={styles.updateBannerButton} onPress={applyAppUpdate} disabled={updatingApp}>
+            <Text style={styles.updateBannerButtonText}>{updatingApp ? 'Updating...' : 'Update Now'}</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.updateBannerClose} onPress={() => setUpdateAvailable(false)} disabled={updatingApp}>
+            <Text style={styles.updateBannerCloseText}>×</Text>
+          </TouchableOpacity>
+        </View>
+      )}<View style={styles.headerBgTop} /><View style={styles.headerBgBottom} /><View style={styles.navbar}><View style={styles.logoSection}><View style={styles.headerLogoCircle}><Image
+              source={require('../../assets/images/Firebase Firestore Setup.png')}
+              style={styles.headerLogoImage}
+              resizeMode="contain"
+            /></View><View><Text style={styles.logoTitle}>FurEver Found</Text><Text style={styles.logoSub}>Bogo City AI Recovery Platform</Text></View></View></View>
+      {activeTab !== 'login' && (
+        <View style={styles.mobileHeader}>
+          <TouchableOpacity style={styles.menuButton} onPress={() => setShowMenu(true)} activeOpacity={0.8}>
+            <Text style={styles.menuButtonText}>☰</Text>
+          </TouchableOpacity>
+          <View style={styles.headerCenter}>
+            <Text style={styles.headerRole}>{currentRole}</Text>
+          </View>
+          <TouchableOpacity style={styles.headerNotificationButton} onPress={() => setShowNotifications(true)} activeOpacity={0.8}>
+            <Text style={styles.headerNotificationText}>🔔</Text>
+            {notifications.filter(n => !n.read).length > 0 && (
+              <View style={styles.notificationBadge}>
+                <Text style={styles.notificationBadgeText}>{notifications.filter(n => !n.read).length}</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        </View>
+      )}
+      <Modal visible={showMenu} transparent animationType="fade" onRequestClose={() => setShowMenu(false)}>
+        <View style={styles.drawerOverlay}>
+          <TouchableOpacity style={styles.drawerBackdrop} activeOpacity={1} onPress={() => setShowMenu(false)} />
+          <View style={styles.drawer}>
+            <View style={styles.drawerHeader}>
+              <View style={styles.drawerLogoRow}>
+                <View style={styles.drawerLogoCircle}>
+                  <Image source={require('../../assets/images/Firebase Firestore Setup.png')} style={styles.drawerLogoImage} resizeMode="contain" />
+                </View>
+                <View style={{flex:1}}>
+                  <Text style={styles.drawerTitle}>FurEver Found</Text>
+                  <Text style={styles.drawerRole}>{currentRole}</Text>
+                </View>
+                <TouchableOpacity onPress={() => setShowMenu(false)} style={styles.drawerClose}>
+                  <Text style={styles.drawerCloseText}>✕</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <ScrollView contentContainerStyle={styles.drawerScroll} showsVerticalScrollIndicator={false}>
+              {/* MAIN */}
+              <View style={styles.drawerGroup}>
+                <TouchableOpacity style={styles.drawerSectionHeader} onPress={() => toggleSidebarSection('MAIN')} activeOpacity={0.8}>
+                  <Text style={styles.drawerSectionTitle}>MAIN</Text>
+                  <Text style={styles.drawerChevron}>{sidebarSections.MAIN ? '⌃' : '⌄'}</Text>
+                </TouchableOpacity>
+                {sidebarSections.MAIN && <>
+                  <TouchableOpacity style={[styles.drawerItem, activeTab === 'map' && styles.drawerItemActive]} onPress={() => navigateFromSidebar('map')}>
+                    <Text style={styles.drawerItemIcon}>🗺️</Text><Text style={[styles.drawerItemText, activeTab === 'map' && styles.drawerItemTextActive]}>Sighting Map</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.drawerItem, activeTab === 'report' && styles.drawerItemActive]} onPress={() => navigateFromSidebar('report')}>
+                    <Text style={styles.drawerItemIcon}>📋</Text><Text style={[styles.drawerItemText, activeTab === 'report' && styles.drawerItemTextActive]}>Reports / AI Matching</Text>
+                  </TouchableOpacity>
+                  {currentRole === 'PET OWNER' && (
+                    <TouchableOpacity style={[styles.drawerItem, activeTab === 'petProfiles' && styles.drawerItemActive]} onPress={() => navigateFromSidebar('petProfiles')}>
+                      <Text style={styles.drawerItemIcon}>🐾</Text><Text style={[styles.drawerItemText, activeTab === 'petProfiles' && styles.drawerItemTextActive]}>My Pets & QR Tags</Text>
+                    </TouchableOpacity>
+                  )}
+                </>}
+              </View>
+
+              {/* PET TOOLS */}
+              {currentRole !== 'COMMUNITY MEMBER' && (
+                <View style={styles.drawerGroup}>
+                  <TouchableOpacity style={styles.drawerSectionHeader} onPress={() => toggleSidebarSection('PET TOOLS')} activeOpacity={0.8}>
+                    <Text style={styles.drawerSectionTitle}>PET TOOLS</Text>
+                    <Text style={styles.drawerChevron}>{sidebarSections['PET TOOLS'] ? '⌃' : '⌄'}</Text>
+                  </TouchableOpacity>
+                  {sidebarSections['PET TOOLS'] && <>
+                    {currentRole === 'PET OWNER' && (
+                      <TouchableOpacity style={[styles.drawerItem, (activeTab === 'petid' || activeTab === 'petidResult') && styles.drawerItemActive]} onPress={() => navigateFromSidebar('petProfiles')}>
+                        <Text style={styles.drawerItemIcon}>🪪</Text><Text style={[styles.drawerItemText, (activeTab === 'petid' || activeTab === 'petidResult') && styles.drawerItemTextActive]}>Pet ID & QR Management</Text>
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity style={[styles.drawerItem, activeTab === 'poster' && styles.drawerItemActive]} onPress={() => navigateFromSidebar('poster')}>
+                      <Text style={styles.drawerItemIcon}>🖼️</Text><Text style={[styles.drawerItemText, activeTab === 'poster' && styles.drawerItemTextActive]}>Posters</Text>
+                    </TouchableOpacity>
+                  </>}
+                </View>
+              )}
+
+              {/* RECOVERY */}
+              <View style={styles.drawerGroup}>
+                <TouchableOpacity style={styles.drawerSectionHeader} onPress={() => toggleSidebarSection('RECOVERY')} activeOpacity={0.8}>
+                  <Text style={styles.drawerSectionTitle}>RECOVERY</Text>
+                  <Text style={styles.drawerChevron}>{sidebarSections.RECOVERY ? '⌃' : '⌄'}</Text>
+                </TouchableOpacity>
+                {sidebarSections.RECOVERY && <>
+                  <TouchableOpacity style={[styles.drawerItem, activeTab === 'cases' && caseFilterType === 'ALL' && styles.drawerItemActive]} onPress={() => navigateFromSidebar('cases', undefined, 'ALL')}>
+                    <Text style={styles.drawerItemIcon}>📂</Text><Text style={[styles.drawerItemText, activeTab === 'cases' && caseFilterType === 'ALL' && styles.drawerItemTextActive]}>All Cases ({reports.length})</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.drawerItem, activeTab === 'cases' && caseFilterType === 'LOST' && styles.drawerItemActive]} onPress={() => navigateFromSidebar('cases', undefined, 'LOST')}>
+                    <Text style={styles.drawerItemIcon}>🔴</Text><Text style={[styles.drawerItemText, activeTab === 'cases' && caseFilterType === 'LOST' && styles.drawerItemTextActive]}>Lost Cases ({reports.filter(r => r.type === 'LOST').length})</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.drawerItem, activeTab === 'cases' && caseFilterType === 'FOUND' && styles.drawerItemActive]} onPress={() => navigateFromSidebar('cases', undefined, 'FOUND')}>
+                    <Text style={styles.drawerItemIcon}>🟢</Text><Text style={[styles.drawerItemText, activeTab === 'cases' && caseFilterType === 'FOUND' && styles.drawerItemTextActive]}>Found Cases ({reports.filter(r => r.type === 'FOUND').length})</Text>
+                  </TouchableOpacity>
+                </>}
+              </View>
+
+              {/* ADMINISTRATION */}
+              {currentRole === 'ADMINISTRATOR' && (
+                <View style={styles.drawerGroup}>
+                  <TouchableOpacity style={styles.drawerSectionHeader} onPress={() => toggleSidebarSection('ADMINISTRATION')} activeOpacity={0.8}>
+                    <Text style={styles.drawerSectionTitle}>ADMINISTRATION</Text>
+                    <Text style={styles.drawerChevron}>{sidebarSections.ADMINISTRATION ? '⌃' : '⌄'}</Text>
+                  </TouchableOpacity>
+                  {sidebarSections.ADMINISTRATION && <>
+                    <TouchableOpacity style={[styles.drawerItem, activeTab === 'admin' && adminSubTab === 'dashboard' && styles.drawerItemActive]} onPress={() => navigateFromSidebar('admin', 'dashboard')}>
+                      <Text style={styles.drawerItemIcon}>📊</Text><Text style={[styles.drawerItemText, activeTab === 'admin' && adminSubTab === 'dashboard' && styles.drawerItemTextActive]}>Admin Dashboard</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.drawerItem, activeTab === 'admin' && adminSubTab === 'users' && styles.drawerItemActive]} onPress={() => navigateFromSidebar('admin', 'users')}>
+                      <Text style={styles.drawerItemIcon}>👥</Text><Text style={[styles.drawerItemText, activeTab === 'admin' && adminSubTab === 'users' && styles.drawerItemTextActive]}>User Management</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.drawerItem, activeTab === 'admin' && adminSubTab === 'reports' && styles.drawerItemActive]} onPress={() => navigateFromSidebar('admin', 'reports')}>
+                      <Text style={styles.drawerItemIcon}>📋</Text><Text style={[styles.drawerItemText, activeTab === 'admin' && adminSubTab === 'reports' && styles.drawerItemTextActive]}>Report Management</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.drawerItem, activeTab === 'admin' && adminSubTab === 'recovery' && styles.drawerItemActive]} onPress={() => navigateFromSidebar('admin', 'recovery')}>
+                      <Text style={styles.drawerItemIcon}>📑</Text><Text style={[styles.drawerItemText, activeTab === 'admin' && adminSubTab === 'recovery' && styles.drawerItemTextActive]}>Recovery Management</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.drawerItem, activeTab === 'adminRecoveryReport' && styles.drawerItemActive]} onPress={() => navigateFromSidebar('adminRecoveryReport')}>
+                      <Text style={styles.drawerItemIcon}>📄</Text><Text style={[styles.drawerItemText, activeTab === 'adminRecoveryReport' && styles.drawerItemTextActive]}>Generated Recovery Report</Text>
+                    </TouchableOpacity>
+                  </>}
+                </View>
+              )}
+
+              {/* ACCOUNT */}
+              <View style={styles.drawerGroup}>
+                <TouchableOpacity style={styles.drawerSectionHeader} onPress={() => toggleSidebarSection('ACCOUNT')} activeOpacity={0.8}>
+                  <Text style={styles.drawerSectionTitle}>ACCOUNT</Text>
+                  <Text style={styles.drawerChevron}>{sidebarSections.ACCOUNT ? '⌃' : '⌄'}</Text>
+                </TouchableOpacity>
+                {sidebarSections.ACCOUNT && <>
+                  <TouchableOpacity style={styles.drawerItem} onPress={() => { setShowMenu(false); setShowNotifications(true); }}>
+                    <Text style={styles.drawerItemIcon}>🔔</Text><Text style={styles.drawerItemText}>Notifications {notifications.filter(n => !n.read).length > 0 ? `(${notifications.filter(n => !n.read).length})` : ''}</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.drawerItemLogout} onPress={() => { setShowMenu(false); handleLogout(); }}>
+                    <Text style={styles.drawerItemIcon}>🚪</Text><Text style={styles.drawerItemLogoutText}>Logout</Text>
+                  </TouchableOpacity>
+                </>}
+              </View>
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+      <Modal visible={showNotifications} transparent animationType="fade" onRequestClose={() => setShowNotifications(false)}><View style={styles.modalOverlay}><View style={styles.modalCard}><View style={styles.notificationHeader}><View><Text style={styles.title}>🔔 Notifications</Text><Text style={styles.desc}>Real-time FurEver Found alerts</Text></View><TouchableOpacity onPress={() => setShowNotifications(false)}><Text style={styles.modalCloseText}>✕</Text></TouchableOpacity></View><ScrollView style={styles.notificationList}>
+              {notifications.length === 0 ? (
+                <Text style={styles.emptyNotification}>No notifications yet.</Text>
+              ) : notifications.map(n => (
+                <TouchableOpacity
+                  key={n.id}
+                  style={[styles.notificationItem, !n.read && styles.notificationUnread]}
+                  onPress={async () => {
+                    if (db && !n.read) await updateDoc(doc(db, 'notifications', n.id), { read: true });
+                  }}
+                ><Text style={styles.notificationTitle}>{n.title}</Text><Text style={styles.notificationMessage}>{n.message}</Text><Text style={styles.notificationTime}>{getNotificationTime(n.createdAt)} • {n.type}</Text></TouchableOpacity>
+              ))}
+            </ScrollView>
+            {notifications.length > 0 && (
+              <TouchableOpacity
+                style={styles.clearNotificationBtn}
+                onPress={async () => {
+                  if (!db) return;
+                  try {
+                    await Promise.all(notifications.map(n => deleteDoc(doc(db, 'notifications', n.id))));
+                  } catch (err) {
+                    Alert.alert('❌ Error', 'Could not clear notifications.');
+                  }
+                }}
+              ><Text style={styles.clearNotificationText}>Clear Notification History</Text></TouchableOpacity>
+            )}
+          </View></View></Modal>
+      {activeTab === 'login' ? (
+        <ScrollView contentContainerStyle={styles.content}><View style={styles.card}>
+            {authMode === 'login' ? (
+              <><Text style={styles.title}>🔐 Portal Login</Text><Text style={styles.desc}>Enter your email and password to login</Text><Text style={styles.label}>Email Address</Text><TextInput style={styles.input} placeholder="user@gmail.com" value={authEmail} onChangeText={setAuthEmail} autoCapitalize="none" keyboardType="email-address" /><Text style={styles.label}>Password</Text><TextInput style={styles.input} placeholder="Enter password" secureTextEntry value={authPassword} onChangeText={setAuthPassword} /><TouchableOpacity style={styles.btnPrimary} onPress={handleCredentialLogin}><Text style={styles.btnText}>🔐 Login</Text></TouchableOpacity><TouchableOpacity style={{marginTop:12,alignItems:'center'}} onPress={handleForgotPassword}><Text style={{color:'#0D9488',fontSize:13,fontWeight:'600',textDecorationLine:'underline'}}>Forgot Password?</Text></TouchableOpacity><TouchableOpacity style={{marginTop:16,alignItems:'center'}} onPress={() => setAuthMode('signup')}><Text style={{color:'#0D9488',fontSize:13,fontWeight:'600'}}>
+                    Don&apos;t have an account? <Text style={{textDecorationLine:'underline'}}>Sign Up</Text></Text></TouchableOpacity></>
+            ) : (
+              <><Text style={styles.title}>📝 Create Account</Text><Text style={styles.desc}>✅ Verify Gmail → then login</Text><Text style={styles.label}>Full Name</Text><TextInput style={styles.input} placeholder="Juan Dela Cruz" value={signupName} onChangeText={setSignupName} /><Text style={styles.label}>Email Address (Gmail)</Text><TextInput style={styles.input} placeholder="you@gmail.com" value={signupEmail} onChangeText={setSignupEmail} autoCapitalize="none" keyboardType="email-address" /><Text style={styles.label}>Password</Text><TextInput style={styles.input} placeholder="At least 6 characters" secureTextEntry value={signupPassword} onChangeText={setSignupPassword} /><Text style={styles.label}>Confirm Password</Text><TextInput style={styles.input} placeholder="Re-enter password" secureTextEntry value={signupConfirmPassword} onChangeText={setSignupConfirmPassword} /><Text style={styles.label}>Account Type</Text><View style={styles.row}><TouchableOpacity
+                    style={[styles.tab, signupRole==='PET OWNER' && styles.tabActiveFound]}
+                    onPress={() => setSignupRole('PET OWNER')}
+                  ><Text style={styles.tabText}>Pet Owner</Text></TouchableOpacity><TouchableOpacity
+                    style={[styles.tab, signupRole==='COMMUNITY MEMBER' && styles.tabActiveFound]}
+                    onPress={() => setSignupRole('COMMUNITY MEMBER')}
+                  ><Text style={styles.tabText}>Community</Text></TouchableOpacity></View><TouchableOpacity
+                  style={[styles.btnPrimary, signingUp && {opacity:0.6}]}
+                  onPress={handleSignUp}
+                  disabled={signingUp}
+                ><Text style={styles.btnText}>{signingUp ? 'Sending Verification...' : '📧 Create & Send Verification'}</Text></TouchableOpacity><TouchableOpacity style={{marginTop:16,alignItems:'center'}} onPress={() => setAuthMode('login')}><Text style={{color:'#0D9488',fontSize:13,fontWeight:'600'}}>
+                    Already verified? <Text style={{textDecorationLine:'underline'}}>Login</Text></Text></TouchableOpacity></>
+            )}
+          </View></ScrollView>
+      ) : (
+        <View style={{flex:1, overflow:'hidden'}}>
+          <View style={{flex:1, transform:[{scale:uiZoom}], width:`${100 / uiZoom}%`}}>
+        <View style={styles.content}>
+        {activeTab === 'petProfiles' && currentRole === 'PET OWNER' && (
+    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} nestedScrollEnabled>
+      <View style={styles.card}>
+        <Text style={styles.title}>🐾 My Pets & QR Tags</Text>
+        <Text style={styles.desc}>Manage all of your pets in one place. Each pet has its own immutable Pet ID and QR Tag. Creating a pet automatically creates its QR tag and missing-pet poster.</Text>
+        <TouchableOpacity style={styles.btnPrimary} onPress={openCreatePetProfile}>
+          <Text style={styles.btnText}>➕ Add Pet Profile</Text>
+        </TouchableOpacity>
+
+        {petProfilesLoading ? (
+          <Text style={styles.empty}>Loading pet profiles...</Text>
+        ) : petProfiles.length === 0 ? (
+          <View style={{padding:16,marginTop:12,backgroundColor:'#F8FAFC',borderRadius:12,borderWidth:1,borderColor:'#E2E8F0'}}>
+            <Text style={styles.empty}>No pet profiles yet.</Text>
+            <Text style={{color:'#64748B',fontSize:12,textAlign:'center',marginTop:6}}>Create your first pet profile. Its Pet ID, QR tag, and automatic poster will be generated together.</Text>
+          </View>
+        ) : (
+          petProfiles.map((pet) => {
+            const isSelected = selectedPetForTag?.id === pet.id;
+            const mapUrl = pet.location?.trim()
+              ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(pet.location.trim())}`
+              : 'https://www.google.com/maps';
+            return (
+              <View key={pet.id} style={[styles.item,{marginTop:14}]}> 
+                {pet.imageUrl ? <Image source={{uri: pet.imageUrl}} style={{width:'100%',height:180,borderRadius:12,marginBottom:10}} resizeMode="cover" /> : null}
+                <Text style={styles.itemName}>{pet.petName}</Text>
+                <Text style={styles.itemLoc}>🐾 {pet.species} • 🧬 {pet.breed}</Text>
+                <Text style={styles.itemLoc}>🎨 {pet.coatPattern} • 🏷️ {pet.markings}</Text>
+                <Text style={styles.itemLoc}>📍 {pet.location}</Text>
+                <Text style={styles.itemLoc}>📞 {pet.contact}</Text>
+                <Text style={styles.itemLoc}>🆔 Pet ID: {pet.petId}</Text>
+                <Text style={styles.itemLoc}>🪪 QR Tag: {pet.tagId || 'Not generated yet'}</Text>
+                <Text style={{marginTop:6,fontSize:12,fontWeight:'700',color:pet.status === 'Active' ? '#15803D' : '#64748B'}}>Status: {pet.status}</Text>
+
+                <View style={{flexDirection:'row',gap:8,marginTop:12,flexWrap:'wrap'}}>
+                  <TouchableOpacity style={styles.userActionBtn} onPress={() => openEditPetProfile(pet)}>
+                    <Text style={styles.userActionBtnText}>✏️ Edit Profile</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.userActionBtn,{backgroundColor:'#0D9488'}]} onPress={() => generatePetProfileQrTag(pet)}>
+                    <Text style={[styles.userActionBtnText,{color:'#fff'}]}>{pet.tagId ? '👁️ View QR' : '🪪 Generate QR'}</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {isSelected && (
+                  <View style={{marginTop:14,padding:16,borderRadius:14,backgroundColor:'#F0FDFA',borderWidth:1,borderColor:'#99F6E4',alignItems:'center'}}>
+                    <Text style={{fontSize:16,fontWeight:'900',color:'#0F2942',marginBottom:8}}>🪪 {pet.petName}&apos;s QR Tag</Text>
+                    <QRCode value={mapUrl} size={210} backgroundColor="#fff" color="#000" />
+                    <Text style={{marginTop:10,fontSize:15,fontWeight:'900',color:'#0D9488'}}>TAG ID: {pet.tagId || 'Generating...'}</Text>
+                    <Text style={{fontSize:11,color:'#64748B',textAlign:'center',marginTop:5}}>Scan → Google Maps opens the saved pet location.</Text>
+                    <View style={{width:'100%',marginTop:10,padding:10,backgroundColor:'#fff',borderRadius:10}}>
+                      <Text style={{fontSize:12,color:'#334155'}}>📍 {pet.location}</Text>
+                      <Text style={{fontSize:12,color:'#334155',marginTop:3}}>📞 {pet.contact}</Text>
+                    </View>
+                    <TouchableOpacity style={[styles.btnPrimary,{marginTop:12,width:'100%'}]} onPress={() => regeneratePetProfileQrTag(pet)}>
+                      <Text style={styles.btnText}>🔄 Regenerate QR Tag</Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                <View style={{marginTop:12,padding:12,borderRadius:10,backgroundColor:'#EFF6FF',borderWidth:1,borderColor:'#BFDBFE'}}>
+                  <Text style={{fontSize:12,fontWeight:'800',color:'#1D4ED8'}}>🖼️ Automatic Poster</Text>
+                  <Text style={{fontSize:11,color:'#1E3A8A',marginTop:3}}>The poster is automatically generated from this pet profile when it is created.</Text>
+                  <TouchableOpacity style={[styles.userActionBtn,{marginTop:8}]} onPress={() => {
+                    setSelectedPetForTag(pet);
+                    setPosterImage(pet.imageUrl || null);
+                    setGeneratedPoster({
+                      name: pet.petName,
+                      breed: pet.breed,
+                      markings: [pet.coatPattern, pet.markings].filter(Boolean).join(' | ') || 'None specified',
+                      contact: pet.contact,
+                      timestamp: new Date().toLocaleDateString(),
+                    });
+                    setActiveTab('posterResult');
+                  }}>
+                    <Text style={styles.userActionBtnText}>📄 View Automatic Poster</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            );
+          })
+        )}
+      </View>
+    </ScrollView>
+  )}
+
+  {activeTab === 'map' && (
+
+  <View style={styles.card}><View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginBottom:8}}><Text style={styles.title}>🎯 Sighting Map</Text><Text style={styles.roleText}>Role: {currentRole}</Text></View><View style={styles.mapBox}><WebView source={{ html: ` <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" /><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style> html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #f8fafc; } #map { height: 100vh; width: 100vw; touch-action: none; } .zoom-ui { position:absolute; z-index:9999; right:14px; top:14px; display:flex; flex-direction:column; gap:6px; } .zoom-btn { width:44px; height:44px; border:1px solid #cbd5e1; border-radius:10px; background:#ffffff; color:#0f2942; font-size:28px; font-weight:800; line-height:40px; text-align:center; box-shadow:0 2px 8px rgba(15,41,66,.22); } .zoom-btn:active { background:#f1f5f9; }</style></head><body><div id="map"></div><div class="zoom-ui"><button class="zoom-btn" type="button" onclick="map.zoomIn()">+</button><button class="zoom-btn" type="button" onclick="map.zoomOut()">−</button></div><script> var map = L.map('map', {dragging:true, touchZoom:true, doubleClickZoom:true, scrollWheelZoom:true, zoomControl:false}).setView([11.0515, 124.0055], 13); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+              L.circle([11.0515, 124.0055], {
+                radius: 5000,
+                color: '#0d9488',
+                fillColor: '#0d9488',
+                fillOpacity: 0.1
+              }).addTo(map);
+
+              var reports = ${JSON.stringify(reports)};
+              reports.forEach(function(r) {
+                if(r.lat && r.lng) {
+                  var color = r.type === 'LOST' ? '#dc2626' : '#16a34a';
+                  L.circleMarker([r.lat, r.lng], { radius: 8, color: color, fillOpacity: 0.8 }).addTo(map)
+                    .bindPopup('<b>' + r.type + ': ' + r.name + '</b><br>' + r.species + ' (' + r.breed + ')<br>' + r.location);
+                }
+              });
+            </script></body></html>
+        `
+      }} 
+      style={styles.map} 
+    /></View><Text style={styles.desc}>
+    {loading ? "Loading reports..." : `Active Reports: ${reports.length}`}
+  </Text><ScrollView style={styles.list}>
+    {loading ? (
+      <Text style={styles.empty}>Loading from database...</Text>
+    ) : reports.length === 0 ? (
+      <Text style={styles.empty}>No reports yet. Submit one first!</Text>
+    ) : (
+      reports.map((r,i) => (
+        <View key={r.id || `mitem-${i}`} style={styles.item}><View style={{flexDirection:'row',justifyContent:'space-between'}}><Text style={[styles.badge, r.type==='LOST'?styles.badgeLost:styles.badgeFound]}>{r.type}</Text>
+            {currentRole === 'ADMINISTRATOR' && (
+              <TouchableOpacity onPress={()=>handleDeleteReport(r.id,r.name)}><Text style={{color:'#b91c1c'}}>🗑️</Text></TouchableOpacity>
+            )}
+          </View><Text style={styles.itemName}>{r.name} — {r.species} ({r.breed})</Text><Text style={styles.itemLoc}>🎨 Coat: {r.coatPattern} | 🏷️ Marks: {r.markings}</Text><Text style={styles.itemLoc}>📍 {r.location} | 📞 {r.contact}</Text></View>
+      ))
+    )}
+  </ScrollView></View>)}
+
+  {activeTab === 'report' && currentRole === 'ADMINISTRATOR' && (
+    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}><View style={styles.card}><Text style={styles.title}>📋 Report Management</Text><Text style={styles.desc}>Administrator view — review, update, resolve, or remove submitted lost and found reports. This screen does not submit new reports.</Text><View style={{padding:10,backgroundColor:'#FFF7ED',borderRadius:8,marginBottom:12,borderWidth:1,borderColor:'#FED7AA'}}><Text style={{color:'#9A3412',fontWeight:'700'}}>🔒 Admin Only: Report management</Text><Text style={{color:'#7C2D12',fontSize:12,marginTop:4}}>Pet Owners and Community Members submit reports. Administrators manage the submitted records.</Text></View><Text style={styles.desc}>Total reports: {reports.length}</Text>
+        {reports.length === 0 ? (
+          <Text style={styles.empty}>No submitted reports yet.</Text>
+        ) : reports.map((r, i) => (
+          <View key={r.id || `admin-report-${i}`} style={styles.item}><View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}><View style={{flex:1,paddingRight:8}}><Text style={styles.itemName}>{r.name} — {r.species}</Text><Text style={styles.itemLoc}>🏷️ {r.type} | Status: {r.status}</Text></View><View style={{flexDirection:'row',gap:8}}><TouchableOpacity style={styles.userActionBtn} onPress={() => openEditReport(r)}><Text style={styles.userActionBtnText}>✏️ Edit</Text></TouchableOpacity><TouchableOpacity style={styles.userActionBtnDanger} onPress={() => handleDeleteReport(r.id, r.name)}><Text style={styles.userActionBtnText}>🗑️ Delete</Text></TouchableOpacity></View></View><Text style={styles.itemLoc}>🧬 Breed: {r.breed} | 🎨 Coat: {r.coatPattern}</Text><Text style={styles.itemLoc}>🏷️ Marks: {r.markings}</Text><Text style={styles.itemLoc}>📍 {r.location} | 📞 {r.contact}</Text><View style={{flexDirection:'row',gap:8,marginTop:8,flexWrap:'wrap'}}><TouchableOpacity style={styles.userActionBtn} onPress={() => handleAdminSetReportStatus(r.id, 'Active')}><Text style={styles.userActionBtnText}>🟢 Active</Text></TouchableOpacity><TouchableOpacity style={styles.userActionBtn} onPress={() => handleAdminSetReportStatus(r.id, 'Resolved')}><Text style={styles.userActionBtnText}>✅ Resolved</Text></TouchableOpacity></View></View>
+        ))}
+      </View></ScrollView>
+  )}
+
+  {activeTab === 'report' && currentRole !== 'ADMINISTRATOR' && ( <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}><View style={styles.card}><Text style={styles.title}>📝 Pet Report & Match</Text><Text style={styles.desc}>Upload a clear pet photo, check the photo locally, and find possible matches.</Text>
+
+                {currentRole === 'COMMUNITY MEMBER' ? (
+                  <View style={{marginBottom:12,padding:10,backgroundColor:'#ECFDF5',borderRadius:8,borderWidth:1,borderColor:'#A7F3D0'}}><Text style={{color:'#0D9488',fontWeight:'700'}}>👥 Community Member — Submit Found Pet Report</Text><Text style={{color:'#065F46',fontSize:12,marginTop:4}}>Upload the found animal&apos;s photo and details. Your report will be saved as FOUND for administrator review and possible matching with LOST reports.</Text></View>
+                ) : (
+                  <View style={styles.row}><TouchableOpacity style={[styles.tab,formType==='LOST'&&styles.tabActiveLost]} onPress={()=>setFormType('LOST')}><Text style={styles.tabText}>LOST</Text></TouchableOpacity><TouchableOpacity style={[styles.tab,formType==='FOUND'&&styles.tabActiveFound]} onPress={()=>setFormType('FOUND')}><Text style={styles.tabText}>FOUND</Text></TouchableOpacity></View>
+                )}
+
+                <Text style={styles.label}>Pet Photo Upload</Text><TouchableOpacity style={styles.photoUploadBox} onPress={async () => {
+                  const result = await launchImageLibraryAsync({
+                    mediaTypes: ['images'],
+                    allowsEditing: true,
+                    quality: 0.8,
+                  });
+                  if (!result.canceled) {
+                    const asset = result.assets[0];
+
+                    
+                    setFormImage(asset.uri);
+                    setAiRecognitionResult(null);
+                  }
+                }}>
+                  {formImage ? (
+                    <Image source={{ uri: formImage }} style={styles.previewImage} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.photoPlaceholder}><Text style={styles.photoIcon}>📷</Text><Text style={styles.photoText}>Tap to Add Pet Photo</Text></View>
+                  )}
+                </TouchableOpacity>
+                {formImage && (
+                  <TouchableOpacity style={styles.removePetPhotoBtn} onPress={() => {
+                    setFormImage(null);
+
+
+                  }}>
+                    <Text style={styles.removePetPhotoText}>✕ Remove Photo</Text>
+                  </TouchableOpacity>
+
+                  
+                )}
+
+                <TouchableOpacity
+                  style={[styles.btnPrimary, { marginTop: 10, backgroundColor: '#4F46E5', opacity: formImage && !aiRecognizing ? 1 : 0.55 }]}
+                  onPress={handleAIRecognition}
+                  disabled={!formImage || aiRecognizing}
+                >
+                  <Text style={styles.btnText}>{aiRecognizing ? '🤖 Recognizing...' : '🤖 Run AI Recognition'}</Text>
+                </TouchableOpacity>
+
+                {aiRecognitionResult && (
+                  <View style={{ marginTop: 10, padding: 12, backgroundColor: '#EEF2FF', borderRadius: 10, borderWidth: 1, borderColor: '#C7D2FE' }}>
+                    <Text style={{ fontWeight: '800', color: '#3730A3', marginBottom: 4 }}>🤖 Recognition Result</Text>
+                    <Text style={{ color: '#334155', fontSize: 12, lineHeight: 18 }}>{aiRecognitionResult}</Text>
+                    <Text style={{ color: '#64748B', fontSize: 10, marginTop: 6 }}>Demo/local mode: no external AI model or backend is used.</Text>
+                  </View>
+                )}
+
+                <Text style={styles.label}>Pet Name / Identifier</Text><TextInput style={styles.input} placeholder="Name or 'Unknown'" value={formName} onChangeText={setFormName} /><Text style={styles.label}>Species</Text><TextInput style={styles.input} placeholder="Dog, Cat, Bird, etc." value={formSpecies} onChangeText={setFormSpecies} /><Text style={styles.label}>Breed / Type</Text><TextInput style={styles.input} placeholder="e.g. Philippine Aspin, Persian, or Unknown / Mixed Breed" value={formBreed} onChangeText={setFormBreed} /><Text style={styles.label}>Coat / Fur / Feather Pattern</Text><TextInput style={styles.input} placeholder="e.g. Brindle, Calico, Spotted, Tabby" value={formCoatPattern} onChangeText={setFormCoatPattern} /><Text style={styles.label}>Distinguished Marks & Traits</Text><TextInput style={styles.input} placeholder="e.g. White chest patch, black left ear" value={formMarkings} onChangeText={setFormMarkings} /><Text style={styles.label}>Location on Map</Text><View style={styles.mapBoxSm}><WebView source={{ html: ` <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1.0"><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" /><script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><style> html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background-color: #f8fafc; } #map { height: 100%; width: 100%; touch-action: none; } .zoom-ui { position:absolute; z-index:9999; right:12px; top:12px; display:flex; flex-direction:column; gap:6px; } .zoom-btn { width:42px; height:42px; border:1px solid #cbd5e1; border-radius:10px; background:#ffffff; color:#0f2942; font-size:27px; font-weight:800; line-height:38px; text-align:center; box-shadow:0 2px 8px rgba(15,41,66,.22); } .zoom-btn:active { background:#f1f5f9; }</style></head><body><div id="map"></div><div class="zoom-ui"><button class="zoom-btn" type="button" onclick="map.zoomIn()">+</button><button class="zoom-btn" type="button" onclick="map.zoomOut()">−</button></div><script> var lat = ${selectedCoords?.latitude || 11.0515}; var lng = ${selectedCoords?.longitude || 124.0055}; var map = L.map('map', { dragging: true, touchZoom: true, doubleClickZoom: true, scrollWheelZoom: true, zoomControl: false }).setView([lat, lng], 15); L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
+
+          var marker = L.marker([lat, lng], {draggable: true}).addTo(map);
+          
+          map.on('click', function(e) {
+            var newLat = e.latlng.lat;
+            var newLng = e.latlng.lng;
+            marker.setLatLng([newLat, newLng]);
+            window.ReactNativeWebView.postMessage(JSON.stringify({lat: newLat, lng: newLng}));
+          });
+
+          marker.on('dragend', function(e) {
+            var pos = marker.getLatLng();
+            window.ReactNativeWebView.postMessage(JSON.stringify({lat: pos.lat, lng: pos.lng}));
+          });
+        </script></body></html>
+    `
+  }}
+  nestedScrollEnabled={true}
+  scrollEnabled={true}
+  style={{ flex: 1 }}
+  onMessage={(event) => {
+    try {
+      const coords = JSON.parse(event.nativeEvent.data);
+      if (coords.lat && coords.lng) {
+        setSelectedCoords({ latitude: coords.lat, longitude: coords.lng });
+      }
+    } catch (e) {
+      console.log("Error parsing coordinate message");
+    }
+  }}
+
+  /></View><Text style={styles.coords}>Lat: {selectedCoords.latitude.toFixed(4)}, Lng: {selectedCoords.longitude.toFixed(4)}</Text><Text style={styles.label}>Location Description</Text><TextInput style={styles.input} placeholder="Barangay/Landmark" value={formLocation} onChangeText={setFormLocation} /><Text style={styles.label}>Contact Number</Text><TextInput style={styles.input} placeholder="09XX-XXX-XXXX" keyboardType="phone-pad" value={formContact} onChangeText={setFormContact} /><View style={styles.submitReportWrap}><TouchableOpacity style={styles.submitReportBtn} onPress={handleFormSubmit} activeOpacity={0.85}><Text style={styles.submitReportBtnText}>🚀 Submit Report</Text><Text style={styles.submitReportHint}>Save this lost/found report</Text></TouchableOpacity></View><View style={{height:24}} /></View></ScrollView>
+  )}{activeTab === 'petid' && currentRole !== 'COMMUNITY MEMBER' && currentRole !== 'ADMINISTRATOR' && (
+  <ScrollView contentContainerStyle={styles.content}><View style={styles.card}><Text style={styles.title}>🪪 QR Tag Generator</Text><Text style={styles.desc}>Scan QR → ONLY location opens in Google Maps | Details printed below</Text>
+
+    {currentRole === 'PET OWNER' ? (
+      <><Text style={styles.label}>👤 Owner Full Name</Text><TextInput 
+          style={styles.input} 
+          placeholder="Enter owner's full name" 
+          value={ownerName} 
+          onChangeText={setOwnerName} 
+        /><Text style={styles.label}>🐾 Pet Name</Text><TextInput 
+          style={styles.input} 
+          placeholder="Enter pet's name" 
+          value={petName} 
+          onChangeText={setPetName} 
+        /><Text style={styles.label}>🧬 Breed</Text><TextInput
+          style={styles.input}
+          placeholder="Enter breed or leave blank for Unknown / Mixed Breed"
+          value={formBreed}
+          onChangeText={setFormBreed}
+        /><Text style={styles.label}>📍 Full Address / Location</Text><TextInput 
+          style={styles.input} 
+          placeholder="Brgy. San Vicente, Bogo City, Cebu" 
+          value={formLocation} 
+          onChangeText={setFormLocation} 
+        /><Text style={styles.label}>📞 Contact Number</Text><TextInput 
+          style={styles.input} 
+          placeholder="09XX-XXX-XXXX" 
+          keyboardType="phone-pad" 
+          value={formContact} 
+          onChangeText={setFormContact} 
+        />
+
+        {tagId === 'FF-2026-BOGO-8842' ? (
+          <TouchableOpacity style={styles.btnPrimary} onPress={generateTag}><Text style={styles.btnText}>✅ Generate QR Tag</Text></TouchableOpacity>
+        ) : (
+          <><View style={{
+              marginTop: 12,
+              padding: 10,
+              backgroundColor: '#FFFBEB',
+              borderRadius: 8,
+              borderWidth: 1,
+              borderColor: '#FDE68A'
+            }}><Text style={{fontSize: 12, color: '#92400E', lineHeight: 16}}>
+                ⚠️ <Text style={{fontWeight:'bold'}}>Edit address → then tap ‘Regenerate QR’</Text>
+                Changes to address do NOT update the QR until you regenerate.
+              </Text></View><View style={{
+              marginTop: 16,
+              padding: 20,
+              backgroundColor: '#FFFFFF',
+              borderRadius: 14,
+              borderWidth: 3,
+              borderColor: '#0D9488',
+              alignItems: 'center'
+            }}><Text style={{fontSize: 16, fontWeight: '900', color: '#0F2942', marginBottom: 12}}>
+                🪪 PET ID QR TAG
+              </Text><View style={{
+                width: '100%',
+                padding: 12,
+                backgroundColor: '#F0FDFA',
+                borderRadius: 10,
+                marginBottom: 14,
+                borderWidth: 1,
+                borderColor: '#99F6E4'
+              }}><Text style={{fontSize: 14, color: '#0F2942', marginBottom: 4}}><Text style={{fontWeight: '800', color: '#0D9488'}}>🐾 Pet Name: </Text>
+                  {petName || '(Not set)'}
+                </Text><Text style={{fontSize: 14, color: '#0F2942', marginBottom: 4}}><Text style={{fontWeight: '800', color: '#0D9488'}}>👤 Owner: </Text>
+                  {ownerName || '(Not set)'}
+                </Text><Text style={{fontSize: 14, color: '#0F2942', marginBottom: 4}}><Text style={{fontWeight: '800', color: '#0D9488'}}>🧬 Breed: </Text>
+                  {formBreed || '(Not set)'}
+                </Text><Text style={{fontSize: 14, color: '#0F2942', marginBottom: 4}}><Text style={{fontWeight: '800', color: '#0D9488'}}>📍 Full Address / Location: </Text>
+                  {formLocation || '(Not set)'}
+                </Text><Text style={{fontSize: 14, color: '#0F2942'}}><Text style={{fontWeight: '800', color: '#0D9488'}}>📞 Contact: </Text>
+                  {formContact || '(Not set)'}
+                </Text></View><QRCode
+                // Scan QR -> Google Maps opens the exact Location Description entered by the user.
+                // Example: "Barangay Gairan, Bogo City, Cebu" -> Google Maps searches that exact text.
+                value={formLocation.trim()
+                  ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formLocation.trim())}`
+                  : 'https://www.google.com/maps'}
+                size={220}
+                backgroundColor="#ffffff"
+                color="#000000"
+              /><Text style={{
+                marginTop: 12,
+                fontSize: 16,
+                fontWeight: 'bold',
+                color: '#0D9488',
+                letterSpacing: 1
+              }}>
+                TAG ID: {tagId}
+              </Text><Text style={{fontSize: 10, color: '#94A3B8', marginTop: 4, textAlign: 'center'}}>
+                📱 Scan → Google Maps opens the Location Description above
+              </Text></View><Text style={{
+              textAlign: 'center',
+              fontSize: 12,
+              color: '#64748B',
+              marginTop: 10,
+              fontStyle: 'italic'
+            }}>
+              💡 QR opens Google Maps using the exact Location Description above
+            </Text><TouchableOpacity 
+              style={[styles.btnPrimary, {
+                marginTop: 16,
+                backgroundColor: '#4F46E5'
+              }]}
+              onPress={() => {
+                if (!petName || !ownerName || !formLocation || !formContact) {
+                  Alert.alert('⚠️ Missing Info', 'Please fill ALL fields before regenerating.');
+                  return;
+                }
+                Alert.alert(
+                  '✅ QR UPDATED',
+                  'QR now opens Google Maps using the exact Location Description entered above.',
+                  [{ text: '✅ Ready to Print' }]
+                );
+              }}
+            ><Text style={styles.btnText}>🔄 Regenerate QR (Map Only)</Text></TouchableOpacity></>
+        )}
+      </>
+    ) : (
+      <View style={{padding: 20}}><Text style={{fontSize: 14, color: '#334155'}}>
+          Administrator View: QR Tag Management Area.
+        </Text></View>
+    )}
+  </View></ScrollView>)}
+
+
+  {activeTab === 'petidResult' && currentRole === 'PET OWNER' && tagId !== 'FF-2026-BOGO-8842' && (
+    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <View style={styles.card}>
+        <Text style={styles.title}>🎫 Generated QR Tag</Text>
+        <Text style={styles.desc}>Your QR Tag has been generated successfully. Scan the QR to open the exact location in Google Maps.</Text>
+        <View style={{ marginTop: 16, padding: 20, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 3, borderColor: '#0D9488', alignItems: 'center' }}>
+          <Text style={{ fontSize: 16, fontWeight: '900', color: '#0F2942', marginBottom: 12 }}>🪪 PET ID QR TAG</Text>
+          <View style={{ width: '100%', padding: 12, backgroundColor: '#F0FDFA', borderRadius: 10, marginBottom: 14, borderWidth: 1, borderColor: '#99F6E4' }}>
+            <Text style={{fontSize: 14, color: '#0F2942', marginBottom: 4}}><Text style={{fontWeight: '800', color: '#0D9488'}}>🐾 Pet Name: </Text>{petName || '(Not set)'}</Text>
+            <Text style={{fontSize: 14, color: '#0F2942', marginBottom: 4}}><Text style={{fontWeight: '800', color: '#0D9488'}}>👤 Owner: </Text>{ownerName || '(Not set)'}</Text>
+            <Text style={{fontSize: 14, color: '#0F2942', marginBottom: 4}}><Text style={{fontWeight: '800', color: '#0D9488'}}>🧬 Breed: </Text>{formBreed || '(Not set)'}</Text>
+            <Text style={{fontSize: 14, color: '#0F2942', marginBottom: 4}}><Text style={{fontWeight: '800', color: '#0D9488'}}>📍 Full Address / Location: </Text>{formLocation || '(Not set)'}</Text>
+            <Text style={{fontSize: 14, color: '#0F2942'}}><Text style={{fontWeight: '800', color: '#0D9488'}}>📞 Contact: </Text>{formContact || '(Not set)'}</Text>
+          </View>
+          <QRCode
+            value={formLocation.trim() ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(formLocation.trim())}` : 'https://www.google.com/maps'}
+            size={220}
+            backgroundColor="#ffffff"
+            color="#000000"
+          />
+          <Text style={{ marginTop: 12, fontSize: 16, fontWeight: 'bold', color: '#0D9488', letterSpacing: 1 }}>TAG ID: {tagId}</Text>
+          <Text style={{fontSize: 10, color: '#94A3B8', marginTop: 4, textAlign: 'center'}}>📱 Scan → Google Maps opens the Location Description above</Text>
+        </View>
+        <TouchableOpacity style={[styles.btnPrimary, {marginTop: 16}]} onPress={() => setActiveTab('petid')}>
+          <Text style={styles.btnText}>✏️ Create / Edit QR Tag</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  )}
+
+  {activeTab === 'poster' && currentRole === 'ADMINISTRATOR' && (
+    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}><View style={styles.card}><Text style={styles.title}>🖼️ Poster Management</Text><Text style={styles.desc}>Administrator view — view and manage poster information associated with submitted lost-animal reports. No new report or poster is submitted here.</Text><View style={{padding:10,backgroundColor:'#EFF6FF',borderRadius:8,marginBottom:12,borderWidth:1,borderColor:'#BFDBFE'}}><Text style={{color:'#1D4ED8',fontWeight:'700'}}>🔒 Admin Only: Poster management</Text><Text style={{color:'#1E3A8A',fontSize:12,marginTop:4}}>Posters are reviewed from existing reports. The Administrator does not use this screen to submit a lost/found report.</Text></View>
+        {reports.filter(r => r.type === 'LOST').length === 0 ? (
+          <Text style={styles.empty}>No lost-animal reports available for poster management.</Text>
+        ) : reports.filter(r => r.type === 'LOST').map((r, i) => (
+          <View key={r.id || `admin-poster-${i}`} style={styles.item}><View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}><View style={{flex:1,paddingRight:8}}><Text style={styles.itemName}>🚨 {r.name} — {r.species}</Text><Text style={styles.itemLoc}>Breed: {r.breed} | Status: {r.status}</Text></View><TouchableOpacity style={styles.userActionBtn} onPress={() => previewAdminPoster(r)}><Text style={styles.userActionBtnText}>👁️ View Poster</Text></TouchableOpacity></View><Text style={styles.itemLoc}>📍 {r.location} | 📞 {r.contact}</Text></View>
+        ))}
+        {generatedPoster && (
+          <View style={[styles.posterOut,{marginTop:14}]}><Text style={styles.posterHead}>⚠️ MISSING PET — BOGO CITY</Text><Text style={styles.posterTitle}>POSTER PREVIEW</Text>
+            {posterImage && (
+              <View style={styles.posterPhotoBox}><Image source={{ uri: posterImage }} style={styles.posterPhoto} resizeMode="cover" /></View>
+            )}
+            <View style={styles.posterNameBox}><Text style={styles.posterNameLabel}>RESPONDS TO:</Text><Text style={styles.posterNameText}>{generatedPoster.name.toUpperCase()}</Text></View><View style={styles.posterInfoBox}><Text style={styles.posterInfoLine}>Breed: {generatedPoster.breed}</Text><Text style={styles.posterInfoLine}>Traits & Markings: {generatedPoster.markings}</Text><Text style={styles.posterInfoLine}>Date: {generatedPoster.timestamp}</Text></View><View style={styles.posterContactBox}><Text style={styles.posterContactLabel}>PLEASE CONTACT:</Text><Text style={styles.posterContactText}>📞 {generatedPoster.contact}</Text></View></View>
+        )}
+      </View></ScrollView>
+  )}
+
+
+  {activeTab === 'posterResult' && currentRole === 'PET OWNER' && generatedPoster && (
+    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <View style={styles.card}>
+        <Text style={styles.title}>📄 Generated Poster</Text>
+        <Text style={styles.desc}>Your missing-pet poster has been generated and saved successfully.</Text>
+        <View style={styles.posterOut}>
+          <Text style={styles.posterHead}>⚠️ MISSING PET — BOGO CITY</Text>
+          <Text style={styles.posterTitle}>HAVE YOU SEEN THIS PET?</Text>
+          {posterImage && (
+            <View style={styles.posterPhotoBox}>
+              <Image source={{ uri: posterImage }} style={styles.posterPhoto} resizeMode="cover" />
+            </View>
+          )}
+          <View style={styles.posterNameBox}>
+            <Text style={styles.posterNameLabel}>RESPONDS TO:</Text>
+            <Text style={styles.posterNameText}>{generatedPoster.name.toUpperCase()}</Text>
+          </View>
+          <View style={styles.posterInfoBox}>
+            <Text style={styles.posterInfoLine}>Breed: {generatedPoster.breed}</Text>
+            <Text style={styles.posterInfoLine}>Traits &amp; Markings: {generatedPoster.markings}</Text>
+            <Text style={styles.posterInfoLine}>Date: {generatedPoster.timestamp}</Text>
+          </View>
+          <View style={styles.posterContactBox}>
+            <Text style={styles.posterContactLabel}>PLEASE CONTACT:</Text>
+            <Text style={styles.posterContactText}>📞 {generatedPoster.contact}</Text>
+          </View>
+        </View>
+        <TouchableOpacity style={[styles.btnPrimary, {marginTop: 16}]} onPress={() => setActiveTab('poster')}>
+          <Text style={styles.btnText}>✏️ Create / Edit Poster</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  )}
+
+  {activeTab === 'poster' && currentRole === 'PET OWNER' && (
+    <ScrollView contentContainerStyle={styles.content}>
+      <View style={styles.card}>
+        <Text style={styles.title}>🚨 Emergency Poster</Text>
+        <Text style={styles.desc}>Create a missing pet poster using the uploaded pet photo.</Text>
+
+        <TouchableOpacity
+          style={styles.photoUploadBox}
+          onPress={async () => {
+            const result = await launchImageLibraryAsync({
+              mediaTypes: ['images'],
+              allowsEditing: true,
+              quality: 0.8,
+            });
+            if (!result.canceled) {
+              setPosterImage(result.assets[0].uri);
+            }
+          }}
+        >
+          {posterImage ? (
+            <Image
+              source={{ uri: posterImage }}
+              style={styles.previewImage}
+              resizeMode="cover"
+            />
+          ) : (
+            <View style={styles.photoPlaceholder}>
+              <Text style={styles.photoIcon}>📷</Text>
+              <Text style={styles.photoText}>Tap to Add Pet Photo</Text>
+            </View>
+          )}
+        </TouchableOpacity>
+
+        {posterImage && (
+          <TouchableOpacity
+            style={styles.removePhotoBtn}
+            onPress={() => setPosterImage(null)}
+          >
+            <Text style={styles.removePhotoText}>✕ Remove Photo</Text>
+          </TouchableOpacity>
+        )}
+
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 }}>
+          <Text style={styles.label}>Name-Only Mode</Text>
+          <Switch value={nameOnlyMode} onValueChange={setNameOnlyMode} />
+        </View>
+
+        <Text style={styles.label}>Pet Name</Text>
+        <TextInput style={styles.input} placeholder="Name" value={posterName} onChangeText={setPosterName} />
+
+        <Text style={styles.label}>Breed / Description</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="e.g. Aspin, brown"
+          value={posterBreed}
+          onChangeText={setPosterBreed}
+        />
+
+        <Text style={styles.label}>Markings / Coat Patterns</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="e.g. Brindle pattern, white chest patch"
+          value={posterMarkings}
+          onChangeText={setPosterMarkings}
+        />
+
+        <Text style={styles.label}>Contact Number</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="09XX-XXX-XXXX"
+          keyboardType="phone-pad"
+          value={posterContact}
+          onChangeText={setPosterContact}
+        />
+
+        <TouchableOpacity style={styles.btnPrimary} onPress={handleGeneratePoster}>
+          <Text style={styles.btnText}>🖨️ Generate Poster</Text>
+        </TouchableOpacity>
+
+        {generatedPoster && (
+          <View style={styles.posterOut}>
+            <Text style={styles.posterHead}>⚠️ MISSING PET — BOGO CITY</Text>
+            <Text style={styles.posterTitle}>HAVE YOU SEEN THIS PET?</Text>
+
+            {posterImage && (
+              <View style={styles.posterPhotoBox}>
+                <Image
+                  source={{ uri: posterImage }}
+                  style={styles.posterPhoto}
+                  resizeMode="cover"
+                />
+              </View>
+            )}
+
+            <View style={styles.posterNameBox}>
+              <Text style={styles.posterNameLabel}>RESPONDS TO:</Text>
+              <Text style={styles.posterNameText}>{generatedPoster.name.toUpperCase()}</Text>
+            </View>
+
+            <View style={styles.posterInfoBox}>
+              <Text style={styles.posterInfoLine}>Breed: {generatedPoster.breed}</Text>
+              <Text style={styles.posterInfoLine}>Traits &amp; Markings: {generatedPoster.markings}</Text>
+              <Text style={styles.posterInfoLine}>Date: {generatedPoster.timestamp}</Text>
+            </View>
+
+            <View style={styles.posterContactBox}>
+              <Text style={styles.posterContactLabel}>PLEASE CONTACT:</Text>
+              <Text style={styles.posterContactText}>📞 {generatedPoster.contact}</Text>
+            </View>
+          </View>
+        )}
+      </View>
+    </ScrollView>
+  )}
+
+          {activeTab === 'cases' && (
+            <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} nestedScrollEnabled={true}>
+              <View style={styles.card}>
+                <Text style={styles.title}>📂 Case Tracking</Text>
+                <Text style={styles.desc}>Track lost and found cases separately using the filters below.</Text>
+                <View style={styles.caseStatsRow}>
+                  <View style={[styles.caseStatBox, styles.caseStatLost]}><Text style={styles.caseStatIcon}>🔴</Text><Text style={styles.caseStatValue}>{activeLostCases}</Text><Text style={styles.caseStatLabel}>Active Lost</Text></View>
+                  <View style={[styles.caseStatBox, styles.caseStatFound]}><Text style={styles.caseStatIcon}>🟢</Text><Text style={styles.caseStatValue}>{activeFoundCases}</Text><Text style={styles.caseStatLabel}>Active Found</Text></View>
+                  <View style={[styles.caseStatBox, styles.caseStatResolved]}><Text style={styles.caseStatIcon}>✅</Text><Text style={styles.caseStatValue}>{resolvedCases}</Text><Text style={styles.caseStatLabel}>Resolved</Text></View>
+                </View>
+                <Text style={styles.caseFilterTitle}>CASE TYPE</Text>
+                <View style={styles.caseFilterRow}>
+                  {[
+                    { key: 'ALL', label: '📂 All Cases', count: reports.length },
+                    { key: 'LOST', label: '🔴 Lost', count: reports.filter(r => r.type === 'LOST').length },
+                    { key: 'FOUND', label: '🟢 Found', count: reports.filter(r => r.type === 'FOUND').length },
+                  ].map(filter => {
+                    const active = caseFilterType === filter.key;
+                    return <TouchableOpacity key={filter.key} style={[styles.caseFilterBtn, active && styles.caseFilterBtnActive, filter.key === 'LOST' && !active && styles.caseFilterLost, filter.key === 'FOUND' && !active && styles.caseFilterFound, filter.key === 'LOST' && active && styles.caseFilterLostActive, filter.key === 'FOUND' && active && styles.caseFilterFoundActive]} onPress={() => setCaseFilterType(filter.key)}>
+                      <Text style={[styles.caseFilterText, active && styles.caseFilterTextActive]}>{filter.label}</Text>
+                      <Text style={[styles.caseFilterCount, active && styles.caseFilterCountActive]}>{filter.count}</Text>
+                    </TouchableOpacity>;
+                  })}
+                </View>
+                <Text style={styles.caseFilterTitle}>STATUS</Text>
+                <View style={styles.caseStatusFilterRow}>
+                  {['ALL', 'Active', 'Resolved'].map(status => <TouchableOpacity key={status} style={[styles.caseStatusFilterBtn, caseFilterStatus === status && styles.caseStatusFilterBtnActive]} onPress={() => setCaseFilterStatus(status)}>
+                    <Text style={[styles.caseStatusFilterText, caseFilterStatus === status && styles.caseStatusFilterTextActive]}>{status === 'ALL' ? 'All Status' : status === 'Active' ? '🟠 Active' : '✅ Resolved'}</Text>
+                  </TouchableOpacity>)}
+                </View>
+                <View style={styles.caseSummaryBox}>
+                  <Text style={styles.caseSummaryTitle}>{caseFilterType === 'ALL' ? 'All Cases' : caseFilterType === 'LOST' ? '🔴 Lost Cases' : '🟢 Found Cases'}</Text>
+                  <Text style={styles.caseSummaryText}>Showing {filteredCaseReports.length} of {reports.length} cases{caseFilterStatus !== 'ALL' ? ` • ${caseFilterStatus} only` : ''}</Text>
+                </View>
+                <ScrollView style={styles.caseListScroll} contentContainerStyle={styles.list} nestedScrollEnabled={true} directionalLockEnabled={false} showsVerticalScrollIndicator={true} keyboardShouldPersistTaps="handled" onStartShouldSetResponderCapture={() => false}>
+                  {loading ? <Text style={styles.empty}>Loading cases from database...</Text> : reports.length === 0 ? <Text style={styles.empty}>⚠️ No cases yet. Submit a report first!</Text> : filteredCaseReports.length === 0 ? <Text style={styles.empty}>No cases match the selected filters.</Text> : filteredCaseReports.map((r, i) => (
+                    <View key={r.id || `case-${i}`} style={styles.caseCard}>
+                      <View style={styles.caseCardHeader}>
+                        <View style={{flex:1,paddingRight:8}}><Text style={styles.itemName}>{r.name} — {r.species}</Text><Text style={styles.caseStatusText}>Status: {r.status}</Text></View>
+                        <View style={{flexDirection:'row',gap:8,alignItems:'center'}}><Text style={[styles.badge, r.type === 'LOST' ? styles.badgeLost : styles.badgeFound]}>{r.type}</Text>{currentRole === 'ADMINISTRATOR' && <TouchableOpacity onPress={() => handleDeleteReport(r.id, r.name)}><Text>🗑️</Text></TouchableOpacity>}</View>
+                      </View>
+                      <Text style={styles.itemLoc}>🧬 Breed: {r.breed} | 🎨 Coat: {r.coatPattern}</Text>
+                      <Text style={styles.itemLoc}>🏷️ Marks: {r.markings}</Text>
+                      <Text style={styles.itemLoc}>📍 {r.location}</Text>
+                      <Text style={styles.itemLoc}>📞 {r.contact}</Text>
+                      {r.tagId && <Text style={styles.casePetId}>🏷️ Tag ID: {r.tagId}</Text>}
+                    </View>
+                  ))}
+                </ScrollView>
+              </View>
+            </ScrollView>
+          )}
+
+          
+          
+  {activeTab === 'adminRecoveryReport' && currentRole === 'ADMINISTRATOR' && (
+    <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <View style={styles.card}>
+        <Text style={styles.title}>📑 Generated Recovery Report</Text>
+        <Text style={styles.desc}>
+          Recovery report generated from the system&apos;s lost and found records.
+        </Text>
+
+        <View style={{marginTop: 14, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: '#F8FAFC'}}>
+          <Text style={{fontSize: 16, fontWeight: '800', marginBottom: 8}}>📊 Recovery Summary</Text>
+          <Text style={{fontSize: 14, marginBottom: 5}}>Resolved / Reunited: {resolvedCount}</Text>
+          <Text style={{fontSize: 14, marginBottom: 5}}>Total Reports: {reports.length}</Text>
+          <Text style={{fontSize: 14}}>Recovery Rate: {recoveryRate}%</Text>
+        </View>
+
+        <View style={{marginTop: 14, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#CBD5E1', backgroundColor: '#FFFFFF'}}>
+          <Text style={{fontSize: 16, fontWeight: '800', marginBottom: 10}}>📋 Report Details</Text>
+          {reports.length === 0 ? (
+            <Text style={styles.empty}>No report records available.</Text>
+          ) : (
+            reports.map((r, i) => (
+              <View key={r.id || `recovery-result-${i}`} style={{paddingVertical: 10, borderBottomWidth: i < reports.length - 1 ? 1 : 0, borderBottomColor: '#E2E8F0'}}>
+                <Text style={{fontWeight: '800', fontSize: 14}}>
+                  {r.name || 'Unknown Pet'} — {r.type || 'REPORT'}
+                </Text>
+                <Text style={{fontSize: 13, marginTop: 3}}>Breed: {r.breed || 'Unknown'}</Text>
+                <Text style={{fontSize: 13, marginTop: 3}}>Location: {r.location || 'Not specified'}</Text>
+                <Text style={{fontSize: 13, marginTop: 3}}>Contact: {r.contact || 'Not specified'}</Text>
+                <Text style={{fontSize: 13, marginTop: 3}}>Status: {r.status || 'Active'}</Text>
+              </View>
+            ))
+          )}
+        </View>
+
+        <TouchableOpacity
+          style={[styles.btnPrimary, {marginTop: 16}]}
+          onPress={() => setActiveTab('admin')}
+        >
+          <Text style={styles.btnText}>↩️ Back to Admin Dashboard</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.btnPrimary, {marginTop: 10}]}
+          onPress={() => setActiveTab('admin')}
+        >
+          <Text style={styles.btnText}>📑 Generate Another Report</Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  )}
+
+  {activeTab === 'admin' && currentRole === 'ADMINISTRATOR' && (
+            <ScrollView contentContainerStyle={styles.content}><View style={styles.adminCard}><Text style={styles.adminTitle}>📊 ADMIN DASHBOARD</Text><Text style={styles.adminSubtitle}>Administrator dashboard — analytics only</Text>
+
+                
+                {adminSubTab === 'dashboard' && (
+                  <><Text style={styles.sectionHeader}>📊 Recovery Rate Analytics</Text><View style={styles.metricRow}><View style={styles.metricBox}><Text style={styles.metricValue}>{reports.length}</Text><Text style={styles.metricLabel}>Total Reports</Text></View><View style={styles.metricBoxHighlight}><Text style={styles.metricValue}>{recoveryRate}%</Text><Text style={styles.metricLabel}>Recovery Rate</Text></View></View><View style={styles.metricRow}><View style={styles.metricBoxRed}><Text style={styles.metricValue}>{lostCount}</Text><Text style={styles.metricLabel}>Active Lost</Text></View><View style={styles.metricBoxGreen}><Text style={styles.metricValue}>{foundCount}</Text><Text style={styles.metricLabel}>Reported Found</Text></View></View><View style={styles.metricRow}><View style={styles.metricBox}><Text style={styles.metricValue}>{resolvedCount}</Text><Text style={styles.metricLabel}>Resolved / Reunited</Text></View><View style={styles.metricBox}><Text style={styles.metricValue}>{allUsers.length}</Text><Text style={styles.metricLabel}>Registered Users</Text></View></View><Text style={styles.sectionHeader}>👥 User Base Overview</Text><View style={styles.metricRow}><View style={styles.metricBoxGreen}><Text style={styles.metricValue}>{activeUsersCount}</Text><Text style={styles.metricLabel}>Active Accounts</Text></View><View style={styles.metricBoxRed}><Text style={styles.metricValue}>{deactivatedUsersCount}</Text><Text style={styles.metricLabel}>Deactivated</Text></View></View></>
+                )}
+
+                
+                {adminSubTab === 'users' && (
+                  <><View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginTop:16,marginBottom:8}}><Text style={styles.sectionHeader}>👥 User Account Management</Text><TouchableOpacity style={styles.addUserBtn} onPress={() => setShowAddUserModal(true)}><Text style={styles.addUserBtnText}>+ Add User</Text></TouchableOpacity></View><TextInput
+                      style={styles.input}
+                      placeholder="Search by name, email, or role..."
+                      value={userSearchQuery}
+                      onChangeText={setUserSearchQuery}
+                    />
+
+                    {usersLoading ? (
+                      <Text style={styles.empty}>Loading users...</Text>
+                    ) : filteredUsers.length === 0 ? (
+                      <Text style={styles.empty}>No users found.</Text>
+                    ) : (
+                      <View style={{marginTop:10}}>
+                        {filteredUsers.map((u) => (
+                          <View key={u.id} style={styles.userItem}><View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start'}}><View style={{flex:1}}><Text style={styles.userName}>{u.name}</Text><Text style={styles.userEmail}>{u.email}</Text><View style={{flexDirection:'row',gap:6,marginTop:4,flexWrap:'wrap'}}><Text style={styles.userRoleBadge}>{u.role}</Text><Text style={[styles.userStatusBadge, (u.active ?? true) ? styles.userStatusActive : styles.userStatusInactive]}>
+                                    {(u.active ?? true) ? 'ACTIVE' : 'DEACTIVATED'}
+                                  </Text>
+                                  {u.emailVerified && <Text style={styles.userVerifiedBadge}>✓ VERIFIED</Text>}
+                                </View></View></View><View style={styles.userActionsRow}><TouchableOpacity style={styles.userActionBtn} onPress={() => openEditUser(u)}><Text style={styles.userActionBtnText}>✏️ Edit</Text></TouchableOpacity><TouchableOpacity style={styles.userActionBtn} onPress={() => handleAdminToggleActive(u)}><Text style={styles.userActionBtnText}>{(u.active ?? true) ? '🚫 Deactivate' : '✅ Reactivate'}</Text></TouchableOpacity><TouchableOpacity style={styles.userActionBtnDanger} onPress={() => handleAdminDeleteUser(u)}><Text style={styles.userActionBtnDangerText}>🗑️ Delete</Text></TouchableOpacity></View></View>
+                        ))}
+                      </View>
+                    )}
+                  </>
+                )}
+
+                
+                {adminSubTab === 'reports' && (
+                  <><Text style={styles.sectionHeader}>📋 Manage Lost & Found Reports</Text><Text style={styles.label}>Filter by Type</Text><View style={styles.row}>
+                      {['ALL','LOST','FOUND'].map(t => (
+                        <TouchableOpacity
+                          key={t}
+                          style={[styles.tab, reportFilterType===t && styles.tabActiveFound]}
+                          onPress={() => setReportFilterType(t)}
+                        ><Text style={styles.tabText}>{t}</Text></TouchableOpacity>
+                      ))}
+                    </View><Text style={styles.label}>Filter by Status</Text><View style={styles.row}>
+                      {['ALL','Active','Resolved'].map(s => (
+                        <TouchableOpacity
+                          key={s}
+                          style={[styles.tab, reportFilterStatus===s && styles.tabActiveFound]}
+                          onPress={() => setReportFilterStatus(s)}
+                        ><Text style={styles.tabText}>{s}</Text></TouchableOpacity>
+                      ))}
+                    </View><Text style={[styles.desc, {marginTop:10}]}>
+                      Showing {filteredAdminReports.length} of {reports.length} reports
+                    </Text>
+
+                    {filteredAdminReports.length === 0 ? (
+                      <Text style={styles.empty}>No reports match this filter.</Text>
+                    ) : (
+                      filteredAdminReports.map((r, i) => (
+                        <View key={r.id || `admin-report-${i}`} style={styles.item}><View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center'}}><Text style={styles.itemName}>{r.name} — {r.species} ({r.breed})</Text><Text style={[styles.badge, r.type==='LOST'?styles.badgeLost:styles.badgeFound]}>{r.type}</Text></View><Text style={styles.itemLoc}>🎨 Coat: {r.coatPattern} | 🏷️ Marks: {r.markings}</Text><Text style={styles.itemLoc}>📍 {r.location} | 📞 {r.contact}</Text><Text style={styles.itemLoc}>Status: {r.status}</Text><View style={styles.userActionsRow}><TouchableOpacity style={styles.userActionBtn} onPress={() => openEditReport(r)}><Text style={styles.userActionBtnText}>✏️ Edit</Text></TouchableOpacity>
+                            {r.status !== 'Resolved' && (
+                              <TouchableOpacity style={styles.userActionBtn} onPress={() => handleAdminSetReportStatus(r.id, 'Resolved')}><Text style={styles.userActionBtnText}>✅ Mark Resolved</Text></TouchableOpacity>
+                            )}
+                            {r.status === 'Resolved' && (
+                              <TouchableOpacity style={styles.userActionBtn} onPress={() => handleAdminSetReportStatus(r.id, 'Active')}><Text style={styles.userActionBtnText}>↩️ Reopen</Text></TouchableOpacity>
+                            )}
+                            <TouchableOpacity style={styles.userActionBtnDanger} onPress={() => handleDeleteReport(r.id, r.name)}><Text style={styles.userActionBtnDangerText}>🗑️ Delete</Text></TouchableOpacity></View></View>
+                      ))
+                    )}
+                  </>
+                )}
+
+                
+                {adminSubTab === 'recovery' && (
+                  <><Text style={styles.sectionHeader}>📑 Recovery Reports</Text><Text style={styles.desc}>
+                      Generate a separate recovery report from the system&apos;s lost and found records.
+                    </Text><View style={[styles.metricRow, {marginTop:12}]}><View style={styles.metricBox}><Text style={styles.metricValue}>{resolvedCount}</Text><Text style={styles.metricLabel}>Resolved / Reunited</Text></View><View style={styles.metricBoxHighlight}><Text style={styles.metricValue}>{recoveryRate}%</Text><Text style={styles.metricLabel}>Recovery Rate</Text></View></View><TouchableOpacity
+                      style={styles.adminNavBtn}
+                      onPress={handleGenerateRecoveryReport}
+                      disabled={generatingRecoveryReport}
+                    ><Text style={styles.navText}>
+                        {generatingRecoveryReport ? '⏳ Generating...' : '📥 Generate Recovery Report'}
+                      </Text></TouchableOpacity>
+
+                    {lastRecoveryReport ? (
+                      <View style={{marginTop:16,padding:12,backgroundColor:'#F8FAFC',borderRadius:10}}><Text style={styles.sectionHeader}>Latest Recovery Report</Text><Text style={{fontSize:13,lineHeight:20}}>{lastRecoveryReport}</Text></View>
+                    ) : (
+                      <Text style={[styles.empty, {marginTop:16}]}>
+                        No recovery report has been generated yet.
+                      </Text>
+                    )}
+                  </>
+                )}
+
+            </View></ScrollView>
+        )}
+        </View>
+          </View>
+        </View>
+      )}
+
+      {activeTab !== 'login' && (
+        <View style={styles.appZoomControls}>
+          <TouchableOpacity style={styles.appZoomButton} onPress={() => setUiZoom(z => Math.min(1.2, Number((z + 0.1).toFixed(1))))} disabled={uiZoom >= 1.2} accessibilityLabel="Zoom in app UI">
+            <Text style={styles.appZoomButtonText}>+</Text>
+          </TouchableOpacity>
+          <Text style={styles.appZoomLevel}>{Math.round(uiZoom * 100)}%</Text>
+          <TouchableOpacity style={styles.appZoomButton} onPress={() => setUiZoom(z => Math.max(0.85, Number((z - 0.1).toFixed(1))))} disabled={uiZoom <= 0.85} accessibilityLabel="Zoom out app UI">
+            <Text style={styles.appZoomButtonText}>−</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      <Modal visible={showAddUserModal} animationType="slide" transparent onRequestClose={() => setShowAddUserModal(false)}><View style={styles.modalOverlay}><View style={styles.modalCard}><ScrollView showsVerticalScrollIndicator={false}><Text style={styles.title}>➕ Add User Account</Text><Text style={styles.desc}>Create a new user profile and assign a role</Text><Text style={styles.label}>Full Name</Text><TextInput style={styles.input} placeholder="Juan Dela Cruz" value={newUserName} onChangeText={setNewUserName} /><Text style={styles.label}>Email Address</Text><TextInput style={styles.input} placeholder="user@gmail.com" value={newUserEmail} onChangeText={setNewUserEmail} autoCapitalize="none" keyboardType="email-address" /><Text style={styles.label}>Temporary Password</Text><TextInput style={styles.input} placeholder="At least 6 characters" secureTextEntry value={newUserPassword} onChangeText={setNewUserPassword} /><Text style={styles.label}>Role</Text><View style={styles.row}><TouchableOpacity style={[styles.tab, newUserRole==='PET OWNER' && styles.tabActiveFound]} onPress={() => setNewUserRole('PET OWNER')}><Text style={styles.tabText}>Pet Owner</Text></TouchableOpacity><TouchableOpacity style={[styles.tab, newUserRole==='COMMUNITY MEMBER' && styles.tabActiveFound]} onPress={() => setNewUserRole('COMMUNITY MEMBER')}><Text style={styles.tabText}>Community</Text></TouchableOpacity><TouchableOpacity style={[styles.tab, newUserRole==='ADMINISTRATOR' && styles.tabActiveFound]} onPress={() => setNewUserRole('ADMINISTRATOR')}><Text style={styles.tabText}>Admin</Text></TouchableOpacity></View><TouchableOpacity style={[styles.btnPrimary, creatingUser && {opacity:0.6}]} onPress={handleAdminAddUser} disabled={creatingUser}><Text style={styles.btnText}>{creatingUser ? 'Creating...' : '✅ Create User'}</Text></TouchableOpacity><TouchableOpacity style={styles.modalCancelBtn} onPress={() => setShowAddUserModal(false)}><Text style={styles.modalCancelText}>Cancel</Text></TouchableOpacity></ScrollView></View></View></Modal><Modal visible={!!editingUser} animationType="slide" transparent onRequestClose={() => setEditingUser(null)}><View style={styles.modalOverlay}><View style={styles.modalCard}><ScrollView showsVerticalScrollIndicator={false}><Text style={styles.title}>✏️ Edit User Account</Text><Text style={styles.desc}>{editingUser?.email}</Text><Text style={styles.label}>Full Name</Text><TextInput style={styles.input} value={editUserName} onChangeText={setEditUserName} /><Text style={styles.label}>Role</Text><View style={styles.row}><TouchableOpacity style={[styles.tab, editUserRole==='PET OWNER' && styles.tabActiveFound]} onPress={() => setEditUserRole('PET OWNER')}><Text style={styles.tabText}>Pet Owner</Text></TouchableOpacity><TouchableOpacity style={[styles.tab, editUserRole==='COMMUNITY MEMBER' && styles.tabActiveFound]} onPress={() => setEditUserRole('COMMUNITY MEMBER')}><Text style={styles.tabText}>Community</Text></TouchableOpacity><TouchableOpacity style={[styles.tab, editUserRole==='ADMINISTRATOR' && styles.tabActiveFound]} onPress={() => setEditUserRole('ADMINISTRATOR')}><Text style={styles.tabText}>Admin</Text></TouchableOpacity></View><View style={{flexDirection:'row',justifyContent:'space-between',alignItems:'center',marginTop:14}}><Text style={styles.label}>Account Active</Text><Switch value={editUserActive} onValueChange={setEditUserActive} /></View><TouchableOpacity style={styles.btnPrimary} onPress={handleAdminUpdateUser}><Text style={styles.btnText}>💾 Save Changes</Text></TouchableOpacity><TouchableOpacity style={styles.modalCancelBtn} onPress={() => setEditingUser(null)}><Text style={styles.modalCancelText}>Cancel</Text></TouchableOpacity></ScrollView></View></View></Modal><Modal visible={!!editingReport} animationType="slide" transparent onRequestClose={() => setEditingReport(null)}><View style={styles.modalOverlay}><View style={styles.modalCard}><ScrollView showsVerticalScrollIndicator={false}><Text style={styles.title}>✏️ Edit Report</Text><Text style={styles.desc}>{editingReport?.type} report — {editingReport?.species}</Text><Text style={styles.label}>Pet Name / Identifier</Text><TextInput style={styles.input} value={editReportName} onChangeText={setEditReportName} /><Text style={styles.label}>Breed</Text><TextInput style={styles.input} value={editReportBreed} onChangeText={setEditReportBreed} /><Text style={styles.label}>Markings</Text><TextInput style={styles.input} value={editReportMarkings} onChangeText={setEditReportMarkings} /><Text style={styles.label}>Location</Text><TextInput style={styles.input} value={editReportLocation} onChangeText={setEditReportLocation} /><Text style={styles.label}>Contact</Text><TextInput style={styles.input} value={editReportContact} onChangeText={setEditReportContact} keyboardType="phone-pad" /><Text style={styles.label}>Status</Text><View style={styles.row}>
+                {['Active','Resolved'].map(s => (
+                  <TouchableOpacity key={s} style={[styles.tab, editReportStatus===s && styles.tabActiveFound]} onPress={() => setEditReportStatus(s)}><Text style={styles.tabText}>{s}</Text></TouchableOpacity>
+                ))}
+              </View><TouchableOpacity style={styles.btnPrimary} onPress={handleAdminUpdateReport}><Text style={styles.btnText}>💾 Save Changes</Text></TouchableOpacity><TouchableOpacity style={styles.modalCancelBtn} onPress={() => setEditingReport(null)}><Text style={styles.modalCancelText}>Cancel</Text></TouchableOpacity></ScrollView></View></View></Modal>
+        <Modal visible={showPetProfileModal} transparent animationType="slide" onRequestClose={() => { setShowPetProfileModal(false); resetPetProfileForm(); }}>
+          <View style={{flex:1,backgroundColor:'rgba(15,23,42,0.45)',justifyContent:'flex-end'}}>
+            <View style={{backgroundColor:'#FFF9EA',borderTopLeftRadius:24,borderTopRightRadius:24,maxHeight:'92%',padding:18}}>
+              <ScrollView showsVerticalScrollIndicator={false}>
+                <Text style={styles.title}>{editingPetProfile ? '✏️ Edit Pet Profile' : '🐾 Create Pet Profile'}</Text>
+                {editingPetProfile && <View style={{padding:10,backgroundColor:'#ECFDF5',borderRadius:10,borderWidth:1,borderColor:'#A7F3D0',marginBottom:12}}>
+                  <Text style={{fontSize:12,fontWeight:'800',color:'#065F46'}}>🔒 Pet ID: {editingPetProfile.petId}</Text>
+                  <Text style={{fontSize:11,color:'#047857',marginTop:3}}>This ID and the QR Tag ID will not be changed when you edit the profile.</Text>
+                </View>}
+                <Text style={styles.label}>📷 Pet Photo</Text>
+                <TouchableOpacity style={styles.photoUploadBox} onPress={async () => {
+                  const result = await launchImageLibraryAsync({mediaTypes:['images'],allowsEditing:true,quality:0.8});
+                  if (!result.canceled) setPetProfileImage(result.assets[0].uri);
+                }}>
+                  {petProfileImage ? <Image source={{uri:petProfileImage}} style={styles.previewImage} resizeMode="cover" /> : <Text style={styles.photoText}>📷 Select Pet Photo</Text>}
+                </TouchableOpacity>
+                <Text style={styles.label}>🐾 Pet Name</Text><TextInput style={styles.input} value={petProfileName} onChangeText={setPetProfileName} placeholder="Pet name" />
+                <Text style={styles.label}>Species</Text><TextInput style={styles.input} value={petProfileSpecies} onChangeText={setPetProfileSpecies} placeholder="Dog, Cat, etc." />
+                <Text style={styles.label}>Breed</Text><TextInput style={styles.input} value={petProfileBreed} onChangeText={setPetProfileBreed} placeholder="Breed or Unknown / Mixed Breed" />
+                <Text style={styles.label}>Coat / Fur Pattern</Text><TextInput style={styles.input} value={petProfileCoatPattern} onChangeText={setPetProfileCoatPattern} placeholder="Coat pattern" />
+                <Text style={styles.label}>Distinguished Marks & Traits</Text><TextInput style={styles.input} value={petProfileMarkings} onChangeText={setPetProfileMarkings} placeholder="White chest, black left ear, etc." />
+                <Text style={styles.label}>📍 Current Location / Address</Text><TextInput style={styles.input} value={petProfileLocation} onChangeText={setPetProfileLocation} placeholder="Enter current location" />
+                <Text style={styles.label}>📞 Contact Number</Text><TextInput style={styles.input} value={petProfileContact} onChangeText={setPetProfileContact} placeholder="09XX-XXX-XXXX" keyboardType="phone-pad" />
+                <Text style={styles.label}>Status</Text>
+                <View style={styles.row}>
+                  {['Active','Missing','Recovered'].map(status => <TouchableOpacity key={status} style={[styles.tab, petProfileStatus===status && styles.tabActiveFound]} onPress={() => setPetProfileStatus(status)}><Text style={styles.tabText}>{status}</Text></TouchableOpacity>)}
+                </View>
+                <TouchableOpacity style={styles.btnPrimary} onPress={savePetProfile}>
+                  <Text style={styles.btnText}>{editingPetProfile ? '💾 Save Profile Changes' : '💾 Create Pet Profile'}</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={{marginTop:10,alignItems:'center',padding:10}} onPress={() => {setShowPetProfileModal(false);resetPetProfileForm();}}>
+                  <Text style={{color:'#64748B',fontWeight:'700'}}>Cancel</Text>
+                </TouchableOpacity>
+                <View style={{height:20}} />
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+
+  </SafeAreaView>
+  );
+
+  }
+
+  const styles = StyleSheet.create({
+  appZoomControls:{position:'absolute',right:16,bottom:22,zIndex:9999,alignItems:'center',gap:6},
+  appZoomButton:{width:46,height:46,borderRadius:12,backgroundColor:'#FFFFFF',borderWidth:1,borderColor:'#CBD5E1',alignItems:'center',justifyContent:'center',elevation:6,shadowOpacity:0.18,shadowRadius:6,shadowOffset:{width:0,height:2}},
+  appZoomButtonText:{fontSize:28,lineHeight:32,fontWeight:'900',color:'#0F2942'},
+  appZoomLevel:{minWidth:46,paddingHorizontal:7,paddingVertical:5,borderRadius:8,backgroundColor:'#0F2942',color:'#FFFFFF',fontSize:10,fontWeight:'800',textAlign:'center'},
+  container:{flex:1,backgroundColor:'#FFF9EA',paddingTop: Platform.OS === 'ios' ? 45 : 0},
+  headerBgTop:{position:'absolute',top:0,left:0,width:180,height:140,backgroundColor:'#0D9488',borderBottomRightRadius:180,borderTopRightRadius:180,zIndex:0},
+  headerBgBottom:{position:'absolute',top:0,right:0,width:140,height:120,backgroundColor:'#F97316',borderBottomLeftRadius:140,zIndex:0},
+  navbar:{paddingHorizontal:IS_TABLET ? 24 : 16,paddingVertical:IS_TABLET ? 18 : 14,position:'relative',zIndex:1},
+  logoSection:{flexDirection:'row',alignItems:'center',gap:10},
+  headerLogoCircle:{
+  width: 44,
+  height: 44,
+  borderRadius: 22,
+  borderWidth: 2,
+  borderColor: '#0D9488',
+  backgroundColor: '#FFF',
+  overflow: 'hidden',
+  alignItems: 'center',
+  justifyContent: 'center',
+  },
+  headerLogoImage: { width: '100%', height: '100%' },
+  logoTitle:{fontSize:18,fontWeight:'900',color:'#0F2942'},
+  logoSub:{fontSize:10,color:'#0D9488',opacity:0.85},
+  mobileHeader:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',paddingHorizontal:IS_TABLET ? 24 : 14,paddingVertical:8,marginHorizontal:IS_TABLET ? 24 : 12,marginBottom:4,borderRadius:14,backgroundColor:'rgba(255,255,255,0.92)',borderWidth:1,borderColor:'#E2E8F0',elevation:2,zIndex:5},
+  menuButton:{width:42,height:42,borderRadius:12,backgroundColor:'#0D9488',alignItems:'center',justifyContent:'center'},
+  menuButtonText:{fontSize:24,fontWeight:'900',color:'#FFFFFF',lineHeight:28},
+  headerCenter:{flex:1,alignItems:'center',justifyContent:'center'},
+  headerRole:{fontSize:11,fontWeight:'900',color:'#0F2942'},
+  headerNotificationButton:{width:42,height:42,borderRadius:12,backgroundColor:'#FEF3C7',alignItems:'center',justifyContent:'center',position:'relative'},
+  headerNotificationText:{fontSize:20},
+  notificationBadge:{position:'absolute',top:-3,right:-3,minWidth:18,height:18,paddingHorizontal:4,borderRadius:9,backgroundColor:'#DC2626',alignItems:'center',justifyContent:'center',borderWidth:2,borderColor:'#FFFFFF'},
+  notificationBadgeText:{fontSize:9,fontWeight:'900',color:'#FFFFFF'},
+  drawerOverlay:{flex:1,flexDirection:'row',backgroundColor:'rgba(15,41,66,0.45)'},
+  drawerBackdrop:{flex:1},
+  drawer:{width:IS_TABLET ? 340 : '82%',maxWidth:360,backgroundColor:'#FFFFFF',height:'100%',paddingTop:Platform.OS === 'ios' ? 45 : 20,elevation:12,shadowColor:'#000',shadowOpacity:0.2,shadowRadius:12,shadowOffset:{width:4,height:0}},
+  drawerHeader:{paddingHorizontal:18,paddingBottom:16,borderBottomWidth:1,borderBottomColor:'#E2E8F0'},
+  drawerLogoRow:{flexDirection:'row',alignItems:'center'},
+  drawerLogoCircle:{width:44,height:44,borderRadius:22,backgroundColor:'#FFFFFF',borderWidth:2,borderColor:'#0D9488',overflow:'hidden',alignItems:'center',justifyContent:'center',marginRight:10},
+  drawerLogoImage:{width:'100%',height:'100%'},
+  drawerTitle:{fontSize:17,fontWeight:'900',color:'#0F2942'},
+  drawerRole:{fontSize:10,fontWeight:'700',color:'#0D9488',marginTop:2},
+  drawerClose:{width:36,height:36,borderRadius:10,backgroundColor:'#F1F5F9',alignItems:'center',justifyContent:'center'},
+  drawerCloseText:{fontSize:17,fontWeight:'900',color:'#64748B'},
+  drawerScroll:{padding:14,paddingBottom:40},
+  drawerGroup:{backgroundColor:'#F8FAFC',borderWidth:1,borderColor:'#E2E8F0',borderRadius:16,padding:8,marginBottom:10},
+  drawerSectionHeader:{flexDirection:'row',alignItems:'center',justifyContent:'space-between',minHeight:34,borderRadius:10,paddingHorizontal:2},
+  drawerSectionTitle:{fontSize:10,fontWeight:'900',color:'#94A3B8',letterSpacing:0.8,marginTop:8,marginBottom:6,paddingHorizontal:8},
+  drawerChevron:{fontSize:16,fontWeight:'900',color:'#64748B',paddingHorizontal:8},
+  drawerItem:{flexDirection:'row',alignItems:'center',minHeight:48,paddingHorizontal:12,borderRadius:12,marginBottom:4},
+  drawerItemActive:{backgroundColor:'#CCFBF1'},
+  drawerItemIcon:{width:30,fontSize:18,textAlign:'center',marginRight:8},
+  drawerItemText:{flex:1,fontSize:13,fontWeight:'700',color:'#334155'},
+  drawerItemTextActive:{color:'#0F766E',fontWeight:'900'},
+  drawerItemLogout:{flexDirection:'row',alignItems:'center',minHeight:48,paddingHorizontal:12,borderRadius:12,marginTop:4,backgroundColor:'#FEF2F2'},
+  drawerItemLogoutText:{flex:1,fontSize:13,fontWeight:'800',color:'#B91C1C'},
+  navRow:{flexDirection:'row',flexWrap:'wrap',backgroundColor:'rgba(13,148,136,0.08)',paddingHorizontal:10,paddingVertical:10,gap:IS_TABLET ? 10 : 7,marginHorizontal:IS_TABLET ? 24 : 12,borderRadius:12},
+  navBtn:{paddingHorizontal:IS_TABLET ? 14 : 11,paddingVertical:IS_TABLET ? 9 : 7,borderRadius:16,backgroundColor:'rgba(13,148,136,0.12)'},
+  navBtnActive:{backgroundColor:'#0D9488',borderWidth:1,borderColor:'#0F766E'},
+  navText:{fontSize:12,fontWeight:'700',color:'#0F2942'},
+  navTextActive:{color:'#FFFFFF',fontWeight:'900'},
+  adminNavBtn:{paddingHorizontal:11,paddingVertical:5,borderRadius:16,backgroundColor:'rgba(249,115,22,0.15)',borderWidth:1,borderColor:'#F97316'},
+  logoutBtn:{paddingHorizontal:11,paddingVertical:7,borderRadius:16,backgroundColor:'rgba(220,38,38,0.12)'},
+  logoutText:{fontSize:12,fontWeight:'700',color:'#DC2626'},
+  content:{paddingHorizontal:HORIZONTAL_PADDING,paddingTop:12,paddingBottom:48,width:'100%',maxWidth:CONTENT_MAX_WIDTH,alignSelf:'center'},
+  card:{backgroundColor:'#FFFFFF',borderRadius:16,padding:IS_TABLET ? 24 : 18,shadowColor:'#000',shadowOpacity:0.06,shadowRadius:8,elevation:2},
+  title:{fontSize:20,fontWeight:'800',color:'#0F2942',marginBottom:4},
+  desc:{fontSize:12,color:'#64748B',marginBottom:14},
+  roleText:{fontSize:11,fontWeight:'700',color:'#0D9488'},
+  label:{fontSize:12,fontWeight:'700',color:'#334155',marginBottom:5,marginTop:8},
+  input:{borderWidth:1,borderColor:'#E2E8F0',borderRadius:10,paddingHorizontal:12,paddingVertical:10,fontSize:14,backgroundColor:'#F8FAFC',color:'#0F2942'},
+  row:{flexDirection:'row',gap:8,marginTop:4,flexWrap:'wrap'},
+  tab:{flexGrow:1,flexBasis:IS_TABLET ? 150 : 105,paddingVertical:9,borderRadius:10,backgroundColor:'#F1F5F9',alignItems:'center'},
+  tabActiveLost:{backgroundColor:'#FECACA'},
+  tabActiveFound:{backgroundColor:'#BBF7D0'},
+  tabText:{fontSize:12,fontWeight:'700',color:'#0F2942'},
+  btnPrimary:{backgroundColor:'#0D9488',borderRadius:12,paddingVertical:13,alignItems:'center',marginTop:16},
+  btnSecondary:{backgroundColor:'#F97316',borderRadius:12,paddingVertical:13,alignItems:'center',marginTop:10},
+  btnDanger:{backgroundColor:'#0F2942',borderRadius:12,paddingVertical:13,alignItems:'center',marginTop:10},
+  btnAi:{backgroundColor:'#EEF2FF',borderRadius:10,paddingVertical:12,alignItems:'center',marginTop:10,borderWidth:1,borderColor:'#C7D2FE'},
+  btnText:{color:'#FFFFFF',fontSize:14,fontWeight:'700'},
+  aiNote:{fontSize:11,color:'#6366F1',marginTop:6,textAlign:'center'},
+  aiBox:{backgroundColor:'#EEF2FF',borderRadius:8,padding:10,marginTop:8},
+  aiText:{fontSize:12,color:'#4338CA',lineHeight:16},
+  mapBox: {
+  height: IS_TABLET ? 360 : 280,
+  borderRadius: 12,
+  overflow: 'hidden',
+  marginBottom: 10,
+  position: 'relative',
+  },
+  mapBoxSm: {
+  height: 320,
+  borderRadius: 12,
+  overflow: 'hidden',
+  marginTop: 6,
+  marginBottom: 6,
+  position: 'relative',
+  },
+  map: {
+  ...StyleSheet.absoluteFill,
+  },
+  coords:{fontSize:11,color:'#94A3B8',marginBottom:6},
+  caseStatsRow:{flexDirection:'row',gap:8,marginTop:10,marginBottom:14},
+  caseStatBox:{flex:1,borderRadius:12,paddingVertical:10,paddingHorizontal:5,alignItems:'center',borderWidth:1},
+  caseStatLost:{backgroundColor:'#FFF1F2',borderColor:'#FECDD3'},caseStatFound:{backgroundColor:'#F0FDF4',borderColor:'#BBF7D0'},caseStatResolved:{backgroundColor:'#EFF6FF',borderColor:'#BFDBFE'},
+  caseStatIcon:{fontSize:15},caseStatValue:{fontSize:20,fontWeight:'900',color:'#0F2942',marginTop:2},caseStatLabel:{fontSize:9,fontWeight:'800',color:'#64748B',marginTop:1,textAlign:'center'},
+  caseFilterTitle:{fontSize:10,fontWeight:'900',color:'#64748B',letterSpacing:0.8,marginTop:5,marginBottom:6},caseFilterRow:{flexDirection:'row',gap:7,marginBottom:10},
+  caseFilterBtn:{flex:1,minHeight:62,borderRadius:12,paddingVertical:8,paddingHorizontal:5,alignItems:'center',justifyContent:'center',backgroundColor:'#F1F5F9',borderWidth:1,borderColor:'#E2E8F0'},caseFilterBtnActive:{backgroundColor:'#0D9488',borderColor:'#0D9488'},caseFilterLost:{backgroundColor:'#FFF7F7',borderColor:'#FECACA'},caseFilterLostActive:{backgroundColor:'#DC2626',borderColor:'#DC2626'},caseFilterFound:{backgroundColor:'#F0FDF4',borderColor:'#BBF7D0'},caseFilterFoundActive:{backgroundColor:'#16A34A',borderColor:'#16A34A'},caseFilterText:{fontSize:10,fontWeight:'800',color:'#334155',textAlign:'center'},caseFilterTextActive:{color:'#FFFFFF'},caseFilterCount:{fontSize:18,fontWeight:'900',color:'#0F2942',marginTop:2},caseFilterCountActive:{color:'#FFFFFF'},
+  caseStatusFilterRow:{flexDirection:'row',gap:7,marginBottom:12},caseStatusFilterBtn:{flex:1,paddingVertical:9,borderRadius:10,backgroundColor:'#F1F5F9',alignItems:'center',borderWidth:1,borderColor:'#E2E8F0'},caseStatusFilterBtnActive:{backgroundColor:'#0D9488',borderColor:'#0D9488'},caseStatusFilterText:{fontSize:10,fontWeight:'800',color:'#334155'},caseStatusFilterTextActive:{color:'#FFFFFF'},
+  caseSummaryBox:{backgroundColor:'#F8FAFC',borderRadius:11,padding:10,marginBottom:10,borderWidth:1,borderColor:'#E2E8F0'},caseSummaryTitle:{fontSize:13,fontWeight:'900',color:'#0F2942'},caseSummaryText:{fontSize:11,color:'#64748B',marginTop:2},caseListScroll:{height:IS_TABLET ? 520 : 430,marginTop:8,borderRadius:12,flexGrow:0,flexShrink:0,overflow:'scroll'},
+  caseCard:{backgroundColor:'#F8FAFC',borderRadius:12,padding:12,marginBottom:9,borderWidth:1,borderColor:'#E2E8F0'},caseCardHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start'},caseStatusText:{fontSize:10,fontWeight:'700',color:'#64748B',marginTop:2},casePetId:{fontSize:10,color:'#0D9488',fontWeight:'700',marginTop:4},
+  list:{paddingBottom:20,marginTop:8},
+  empty:{textAlign:'center',color:'#94A3B8',fontSize:12,marginTop:20},
+  item:{backgroundColor:'#F8FAFC',borderRadius:10,padding:10,marginBottom:8},
+  badge:{fontSize:10,fontWeight:'800',paddingHorizontal:8,paddingVertical:3,borderRadius:8,overflow:'hidden'},
+  badgeLost:{backgroundColor:'#FECACA',color:'#B91C1C'},
+  badgeFound:{backgroundColor:'#BBF7D0',color:'#15803D'},
+  itemName:{fontSize:13,fontWeight:'700',color:'#0F2942',marginTop:4},
+  itemLoc:{fontSize:11,color:'#64748B',marginTop:2},
+  photoUploadBox:{height:IS_TABLET ? 210 : 160,borderRadius:12,borderWidth:1,borderColor:'#E2E8F0',borderStyle:'dashed',alignItems:'center',justifyContent:'center',overflow:'hidden',backgroundColor:'#F8FAFC'},
+  photoPlaceholder:{alignItems:'center'},
+  photoIcon:{fontSize:28,marginBottom:6},
+  photoText:{fontSize:12,color:'#64748B'},
+  previewImage:{width:'100%',height:'100%'},
+  removePhotoBtn:{alignSelf:'center',marginTop:8},
+  removePhotoText:{color:'#DC2626',fontSize:12,fontWeight:'700'},
+  posterOut:{marginTop:18,borderRadius:14,borderWidth:2,borderColor:'#0F2942',padding:16,paddingBottom:22,backgroundColor:'#FFF'},
+  posterHead:{textAlign:'center',fontSize:11,fontWeight:'800',color:'#DC2626',marginBottom:4},
+  posterTitle:{textAlign:'center',fontSize:16,fontWeight:'900',color:'#0F2942',marginBottom:10},
+  posterPhotoBox:{height:IS_TABLET ? 220 : 160,borderRadius:10,overflow:'hidden',marginBottom:10},
+  posterPhoto:{width:'100%',height:'100%'},
+  posterNameBox:{alignItems:'center',marginBottom:10},
+  posterNameLabel:{fontSize:10,color:'#64748B',fontWeight:'700'},
+  posterNameText:{fontSize:20,fontWeight:'900',color:'#0D9488'},
+  posterInfoBox:{marginBottom:10},
+  posterInfoLine:{fontSize:12,color:'#334155',marginBottom:2},
+  posterContactBox:{backgroundColor:'#FEF3C7',borderRadius:12,paddingVertical:14,paddingHorizontal:12,alignItems:'center',justifyContent:'center',width:'100%',minHeight:72,marginTop:4,marginBottom:4},
+  posterContactLabel:{fontSize:11,fontWeight:'900',color:'#92400E',textAlign:'center',marginBottom:4},
+  posterContactText:{fontSize:20,fontWeight:'900',color:'#92400E',marginTop:2,textAlign:'center',width:'100%',flexShrink:1,lineHeight:26},
+  adminCard:{backgroundColor:'#FFFFFF',borderRadius:16,padding:18},
+  adminTitle:{fontSize:20,fontWeight:'900',color:'#0F2942'},
+  adminSubtitle:{fontSize:12,color:'#64748B',marginBottom:14},
+  sectionHeader:{fontSize:13,fontWeight:'800',color:'#0F2942',marginTop:16,marginBottom:8},
+  metricRow:{flexDirection:'row',gap:10,marginBottom:4},
+  metricBox:{flex:1,backgroundColor:'#F1F5F9',borderRadius:12,padding:14,alignItems:'center'},
+  metricBoxHighlight:{flex:1,backgroundColor:'#CCFBF1',borderRadius:12,padding:14,alignItems:'center'},
+  metricBoxRed:{flex:1,backgroundColor:'#FEE2E2',borderRadius:12,padding:14,alignItems:'center'},
+  metricBoxGreen:{flex:1,backgroundColor:'#DCFCE7',borderRadius:12,padding:14,alignItems:'center'},
+  metricValue:{fontSize:22,fontWeight:'900',color:'#0F2942'},
+  metricLabel:{fontSize:10,color:'#64748B',marginTop:2},
+  exportBtn:{backgroundColor:'#0F2942',borderRadius:12,paddingVertical:13,alignItems:'center',marginTop:18},
+  exportBtnText:{color:'#FFFFFF',fontSize:13,fontWeight:'700'},
+
+  submitReportWrap:{marginTop:18,marginBottom:8,width:'100%',alignSelf:'center'},
+  submitReportBtn:{backgroundColor:'#0D9488',borderRadius:14,paddingVertical:15,paddingHorizontal:16,alignItems:'center',justifyContent:'center',elevation:3,shadowOpacity:0.12,shadowRadius:4,shadowOffset:{width:0,height:2},minHeight:58},
+  submitReportBtnText:{color:'#FFFFFF',fontSize:16,fontWeight:'900',textAlign:'center'},
+  submitReportHint:{color:'#CCFBF1',fontSize:10,fontWeight:'600',marginTop:3,textAlign:'center'},
+  removePetPhotoBtn:{marginTop:8,marginBottom:8,borderWidth:1,borderColor:'#DC2626',borderRadius:10,paddingVertical:10,paddingHorizontal:14,alignItems:'center',justifyContent:'center',backgroundColor:'#FEF2F2'},
+  removePetPhotoText:{fontSize:13,fontWeight:'700',color:'#B91C1C'},
+  // ===== ADMIN: new styles =====
+  adminSubNavRow:{flexDirection:'row',gap:8,marginTop:14,marginBottom:6,backgroundColor:'#F1F5F9',borderRadius:12,padding:4},
+  adminSubNavBtn:{flex:1,paddingVertical:9,borderRadius:9,alignItems:'center'},
+  adminSubNavBtnActive:{backgroundColor:'#0D9488'},
+  adminSubNavText:{fontSize:11,fontWeight:'700',color:'#334155'},
+  adminSubNavTextActive:{color:'#FFFFFF'},  
+  addUserBtn:{backgroundColor:'#0D9488',paddingHorizontal:14,paddingVertical:8,borderRadius:10},
+  addUserBtnText:{color:'#FFFFFF',fontSize:12,fontWeight:'800'},
+  userItem:{backgroundColor:'#F8FAFC',borderRadius:12,padding:12,marginBottom:10,borderWidth:1,borderColor:'#E2E8F0'},
+  userName:{fontSize:14,fontWeight:'800',color:'#0F2942'},
+  userEmail:{fontSize:11,color:'#64748B',marginTop:1},
+  userRoleBadge:{fontSize:10,fontWeight:'800',color:'#0D9488',backgroundColor:'#CCFBF1',paddingHorizontal:8,paddingVertical:3,borderRadius:8,overflow:'hidden'},
+  userStatusBadge:{fontSize:10,fontWeight:'800',paddingHorizontal:8,paddingVertical:3,borderRadius:8,overflow:'hidden'},
+  userStatusActive:{backgroundColor:'#DCFCE7',color:'#15803D'},
+  userStatusInactive:{backgroundColor:'#FEE2E2',color:'#B91C1C'},
+  userVerifiedBadge:{fontSize:10,fontWeight:'800',color:'#4338CA',backgroundColor:'#EEF2FF',paddingHorizontal:8,paddingVertical:3,borderRadius:8,overflow:'hidden'},
+  userActionsRow:{flexDirection:'row',gap:8,marginTop:10,flexWrap:'wrap'},
+  userActionBtn:{paddingHorizontal:10,paddingVertical:7,borderRadius:8,backgroundColor:'#E2E8F0'},
+  userActionBtnText:{fontSize:11,fontWeight:'700',color:'#0F2942'},
+  userActionBtnDanger:{paddingHorizontal:10,paddingVertical:7,borderRadius:8,backgroundColor:'#FEE2E2'},
+  userActionBtnDangerText:{fontSize:11,fontWeight:'700',color:'#B91C1C'},
+  reportPreviewBox:{marginTop:12,backgroundColor:'#F8FAFC',borderRadius:10,padding:12,borderWidth:1,borderColor:'#E2E8F0'},
+  reportPreviewTitle:{fontSize:12,fontWeight:'800',color:'#0F2942',marginBottom:6},
+  reportPreviewText:{fontSize:11,color:'#334155',fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',lineHeight:16},
+  notificationBtn:{backgroundColor:'#FEF3C7',paddingHorizontal:10,paddingVertical:8,borderRadius:10,marginLeft:4},
+  notificationText:{fontSize:12,fontWeight:'800',color:'#92400E'},
+  updateBanner:{flexDirection:'row',alignItems:'center',backgroundColor:'#ECFDF5',borderBottomWidth:1,borderBottomColor:'#99F6E4',paddingHorizontal:IS_TABLET ? 24 : 12,paddingVertical:10,gap:10},
+  updateBannerTextWrap:{flex:1},
+  updateBannerTitle:{fontSize:13,fontWeight:'900',color:'#0F766E'},
+  updateBannerText:{fontSize:11,color:'#334155',marginTop:2},
+  updateBannerButton:{backgroundColor:'#0D9488',borderRadius:8,paddingHorizontal:10,paddingVertical:8},
+  updateBannerButtonText:{fontSize:11,fontWeight:'800',color:'#FFFFFF'},
+  updateBannerClose:{paddingHorizontal:4,paddingVertical:2},
+  updateBannerCloseText:{fontSize:22,lineHeight:22,fontWeight:'700',color:'#64748B'},
+  notificationHeader:{flexDirection:'row',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10},
+  modalCloseText:{fontSize:20,fontWeight:'900',color:'#64748B'},
+  notificationList:{maxHeight:430},
+  notificationItem:{backgroundColor:'#F8FAFC',borderRadius:12,padding:12,marginBottom:8,borderWidth:1,borderColor:'#E2E8F0'},
+  notificationUnread:{backgroundColor:'#ECFDF5',borderColor:'#99F6E4'},
+  notificationTitle:{fontSize:13,fontWeight:'900',color:'#0F2942',marginBottom:4},
+  notificationMessage:{fontSize:12,color:'#334155',lineHeight:17},
+  notificationTime:{fontSize:9,color:'#94A3B8',marginTop:6},
+  emptyNotification:{textAlign:'center',color:'#94A3B8',paddingVertical:30,fontSize:12},
+  clearNotificationBtn:{backgroundColor:'#FEE2E2',borderRadius:10,paddingVertical:10,alignItems:'center',marginTop:10},
+  clearNotificationText:{color:'#B91C1C',fontSize:12,fontWeight:'800'},
+  modalOverlay:{flex:1,backgroundColor:'rgba(15,41,66,0.5)',justifyContent:'center',padding:20},
+  modalCard:{backgroundColor:'#FFFFFF',borderRadius:16,padding:20,maxHeight:'85%'},
+  modalCancelBtn:{alignItems:'center',marginTop:12,paddingVertical:8},
+  modalCancelText:{color:'#64748B',fontSize:13,fontWeight:'700'},
+
+  });
+    
