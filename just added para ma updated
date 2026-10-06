@@ -14,7 +14,7 @@ import {
   addDoc,
   collection,
   deleteDoc, doc, getDocs, onSnapshot, query,
-  serverTimestamp, updateDoc
+  serverTimestamp, updateDoc, where
 } from 'firebase/firestore';
 import { useEffect, useRef, useState } from 'react';
 import {
